@@ -57,24 +57,27 @@ enum BetType {
 
 // Bets placed against the house (treasury)
 model HouseBet {
-  id            String    @id @default(uuid())
-  gameId        String
-  game          Game      @relation(fields: [gameId], references: [id])
-  userId        String
-  user          User      @relation(fields: [userId], references: [id])
-  chatId        BigInt
-  betType       BetType
-  pick          String    // "home", "away", "over", "under"
-  odds          Int       // The odds at time of bet (American format)
-  line          Float?    // Spread or total line at time of bet
-  amount        BigInt    // Wager amount in lamports
-  potentialWin  BigInt    // Calculated payout if won
-  txSignature   String?   // Deposit transaction
-  status        HouseBetStatus @default(PENDING)
-  result        HouseBetResult?
-  payoutTx      String?   // Payout transaction if won
-  createdAt     DateTime  @default(now())
-  settledAt     DateTime?
+  id              String    @id @default(uuid())
+  gameId          String
+  game            Game      @relation(fields: [gameId], references: [id])
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+  chatId          BigInt
+  betType         BetType
+  pick            String    // "home", "away", "over", "under"
+  odds            Int       // The odds at time of bet (American format)
+  line            Float?    // Spread or total line at time of bet
+  amount          BigInt    // Wager amount in lamports
+  potentialWin    BigInt    // Calculated payout if won
+  // Unique deposit wallet per bet
+  depositAddress    String    @unique
+  depositSecretKey  String    // Encrypted - swept to treasury after confirmation
+  txSignature       String?   // Deposit transaction
+  status            HouseBetStatus @default(PENDING)
+  result            HouseBetResult?
+  payoutTx          String?   // Payout transaction if won
+  createdAt         DateTime  @default(now())
+  settledAt         DateTime?
 
   @@index([gameId])
   @@index([userId])

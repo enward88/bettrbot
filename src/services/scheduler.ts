@@ -3,7 +3,7 @@ import { prisma } from '../db/prisma.js';
 import { refreshTodaysGames, checkGameResults } from './sports.js';
 import { getRecentTransactions, getConnection } from './wallet.js';
 import { settleCompletedGames } from './settlement.js';
-import { settleHouseBets, cancelExpiredHouseBets } from './houseBet.js';
+import { settleHouseBets, cancelExpiredHouseBets, pollHouseBetWallets } from './houseBet.js';
 import { createChildLogger } from '../utils/logger.js';
 import { bot } from '../bot/bot.js';
 import { MIN_BET_LAMPORTS, LAMPORTS_PER_SOL } from '../utils/constants.js';
@@ -212,6 +212,7 @@ export function startScheduler(): void {
   // Poll wallets every 30 seconds
   cron.schedule('*/30 * * * * *', async () => {
     await pollWalletDeposits();
+    await pollHouseBetWallets();
   });
 
   // Lock expired rounds every minute

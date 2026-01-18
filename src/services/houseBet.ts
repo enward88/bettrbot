@@ -1,7 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { config } from '../utils/config.js';
 import { LAMPORTS_PER_SOL } from '../utils/constants.js';
-import { sendSol, getWalletBalance } from './wallet.js';
+import { sendSol, getWalletBalance, createRoundWallet } from './wallet.js';
 import { calculatePayout, formatOdds } from './odds.js';
 import { createChildLogger } from '../utils/logger.js';
 import { bot } from '../bot/bot.js';
@@ -71,7 +71,10 @@ export async function createHouseBet(params: {
   // Calculate potential win
   const potentialWin = calculatePayout(amount, odds);
 
-  // Create the house bet - user deposits to treasury wallet
+  // Create unique deposit wallet for this bet
+  const { address: depositAddress, encryptedSecretKey: depositSecretKey } = await createRoundWallet();
+
+  // Create the house bet with unique deposit wallet
   const houseBet = await prisma.houseBet.create({
     data: {
       gameId,
@@ -83,6 +86,8 @@ export async function createHouseBet(params: {
       line,
       amount,
       potentialWin,
+      depositAddress,
+      depositSecretKey,
       status: 'PENDING',
     },
   });
@@ -103,7 +108,7 @@ export async function createHouseBet(params: {
 
   return {
     id: houseBet.id,
-    depositAddress: config.TREASURY_WALLET_ADDRESS,
+    depositAddress,
     odds,
     line,
     potentialWin,
@@ -499,5 +504,127 @@ export function hasOddsForBetType(
       );
     default:
       return false;
+  }
+}
+
+// Poll pending house bet wallets for deposits
+export async function pollHouseBetWallets(): Promise<void> {
+  const pendingBets = await prisma.houseBet.findMany({
+    where: {
+      status: 'PENDING',
+    },
+    include: {
+      user: true,
+      game: true,
+    },
+  });
+
+  if (pendingBets.length === 0) {
+    return;
+  }
+
+  logger.debug({ count: pendingBets.length }, 'Polling house bet wallets');
+
+  for (const bet of pendingBets) {
+    try {
+      const balance = await getWalletBalance(bet.depositAddress);
+
+      // Check if deposit meets or exceeds expected amount
+      if (balance >= bet.amount) {
+        logger.info(
+          {
+            houseBetId: bet.id,
+            expected: bet.amount.toString(),
+            received: balance.toString(),
+            depositAddress: bet.depositAddress,
+          },
+          'House bet deposit detected'
+        );
+
+        // Sweep funds to treasury
+        const sweepTx = await sweepToTreasury(bet.depositAddress, bet.depositSecretKey, balance);
+
+        if (sweepTx) {
+          // Update bet status to ACTIVE
+          await prisma.houseBet.update({
+            where: { id: bet.id },
+            data: {
+              txSignature: sweepTx,
+              status: 'ACTIVE',
+            },
+          });
+
+          // Notify user
+          try {
+            const amountSol = Number(bet.amount) / LAMPORTS_PER_SOL;
+            const potentialWinSol = Number(bet.potentialWin) / LAMPORTS_PER_SOL;
+
+            let betDescription: string;
+            if (bet.betType === 'MONEYLINE') {
+              const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
+              betDescription = `${team} ML (${formatOdds(bet.odds)})`;
+            } else if (bet.betType === 'TOTAL_OVER') {
+              betDescription = `Over ${bet.line} (${formatOdds(bet.odds)})`;
+            } else if (bet.betType === 'TOTAL_UNDER') {
+              betDescription = `Under ${bet.line} (${formatOdds(bet.odds)})`;
+            } else {
+              const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
+              betDescription = `${team} ${bet.line} (${formatOdds(bet.odds)})`;
+            }
+
+            const username = bet.user.username ? `@${bet.user.username}` : 'Bettor';
+            await bot.api.sendMessage(
+              bet.chatId.toString(),
+              `✅ House Bet Confirmed!\n\n` +
+                `${username}'s bet on ${bet.game.awayTeam} @ ${bet.game.homeTeam}:\n` +
+                `${betDescription}\n` +
+                `Amount: ${amountSol.toFixed(4)} SOL\n` +
+                `Potential win: ${potentialWinSol.toFixed(4)} SOL`
+            );
+          } catch (notifyError) {
+            logger.warn({ error: notifyError, houseBetId: bet.id }, 'Failed to send deposit confirmation');
+          }
+
+          logger.info({ houseBetId: bet.id, sweepTx }, 'House bet activated and swept to treasury');
+        }
+      }
+    } catch (error) {
+      logger.error({ error, houseBetId: bet.id }, 'Failed to poll house bet wallet');
+    }
+  }
+}
+
+// Sweep funds from deposit wallet to treasury
+async function sweepToTreasury(
+  depositAddress: string,
+  depositSecretKey: string,
+  balance: bigint
+): Promise<string | null> {
+  // Leave enough for rent (0.001 SOL = 1,000,000 lamports should be enough for tx fee)
+  const txFee = BigInt(5000); // 0.000005 SOL tx fee
+  const sweepAmount = balance - txFee;
+
+  if (sweepAmount <= BigInt(0)) {
+    logger.warn({ depositAddress, balance: balance.toString() }, 'Balance too low to sweep');
+    return null;
+  }
+
+  try {
+    const txSignature = await sendSol(depositSecretKey, config.TREASURY_WALLET_ADDRESS, sweepAmount);
+
+    logger.info(
+      {
+        from: depositAddress,
+        to: config.TREASURY_WALLET_ADDRESS,
+        amount: sweepAmount.toString(),
+        txSignature,
+      },
+      'Swept house bet deposit to treasury'
+    );
+
+    return txSignature;
+  } catch (error) {
+    logger.error({ error, depositAddress }, 'Failed to sweep to treasury');
+    return null;
   }
 }

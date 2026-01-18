@@ -4,7 +4,6 @@ import { createHouseBet } from '../../services/houseBet.js';
 import { formatOdds } from '../../services/odds.js';
 import { createChildLogger } from '../../utils/logger.js';
 import { LAMPORTS_PER_SOL, MIN_BET_SOL } from '../../utils/constants.js';
-import { config } from '../../utils/config.js';
 
 const logger = createChildLogger('cb:houseBet');
 
@@ -185,9 +184,10 @@ export async function handleHouseBetAmount(ctx: BotContext) {
         `Your pick: ${betDescription} (${formatOdds(houseBet.odds)})\n` +
         `Amount: ${amount} SOL\n` +
         `Potential win: ${potentialWinSol.toFixed(4)} SOL\n\n` +
-        `Send ${amount} SOL to:\n` +
-        `\`${config.TREASURY_WALLET_ADDRESS}\`\n\n` +
-        `Bet ID: ${houseBet.id.slice(0, 8)}`,
+        `Send exactly ${amount} SOL to:\n` +
+        `\`${houseBet.depositAddress}\`\n\n` +
+        `Bet ID: ${houseBet.id.slice(0, 8)}\n` +
+        `⏰ Deposit within 30 minutes`,
       { parse_mode: 'Markdown' }
     );
 
