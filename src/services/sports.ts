@@ -378,29 +378,32 @@ export async function refreshTodaysGames(): Promise<void> {
     'LOL', 'DOTA2', 'CS2',
   ];
 
-  // Fetch all in parallel with error handling for each
-  const fetches = [
-    ...availableSports.map(sport => {
-      const cfg = SPORT_CONFIG[sport];
+  // Fetch sequentially with small delay to avoid rate limiting
+  for (const sport of availableSports) {
+    const cfg = SPORT_CONFIG[sport];
+    try {
       if (cfg.type === 'game') {
-        return fetchTraditionalGames(sport, today).catch(e =>
-          logger.error({ error: e, sport }, 'Failed to fetch games')
-        );
+        await fetchTraditionalGames(sport, today);
       } else if (cfg.type === 'match') {
-        return fetchSoccerMatches(sport, today).catch(e =>
-          logger.error({ error: e, sport }, 'Failed to fetch matches')
-        );
+        await fetchSoccerMatches(sport, today);
       } else if (cfg.type === 'esport') {
-        return fetchEsportsMatches(sport).catch(e =>
-          logger.error({ error: e, sport }, 'Failed to fetch esports')
-        );
+        await fetchEsportsMatches(sport);
       }
-      return Promise.resolve();
-    }),
-    fetchMMAEvents().catch(e => logger.error({ error: e }, 'Failed to fetch MMA')),
-  ];
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logger.error({ error: errorMsg, sport }, 'Failed to fetch sport');
+    }
+    // Small delay between sports to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
 
-  await Promise.all(fetches);
+  // Fetch MMA separately
+  try {
+    await fetchMMAEvents();
+  } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    logger.error({ error: errorMsg }, 'Failed to fetch MMA');
+  }
 
   // Also refresh odds
   await refreshOdds().catch(e => logger.error({ error: e }, 'Failed to refresh odds'));
