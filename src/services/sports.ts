@@ -364,19 +364,41 @@ export async function refreshTodaysGames(): Promise<void> {
   const today = new Date();
   logger.info({ date: today.toISOString() }, 'Refreshing games for all sports');
 
-  // Only fetch sports available on current BALLDONTLIE API tier
-  // NBA and NFL are on the free/basic tier
-  // Add more sports here when you upgrade your API tier
-  const availableSports: Sport[] = ['NBA', 'NFL'];
+  // Sports available on BALLDONTLIE free tier
+  const availableSports: Sport[] = [
+    // Basketball
+    'NBA', 'WNBA', 'NCAAB',
+    // Football
+    'NFL', 'NCAAF',
+    // Soccer
+    'EPL', 'LALIGA', 'SERIEA', 'UCL', 'BUNDESLIGA', 'LIGUE1', 'MLS',
+    // Other
+    'MLB', 'NHL',
+    // Esports
+    'LOL', 'DOTA2', 'CS2',
+  ];
 
   // Fetch all in parallel with error handling for each
   const fetches = [
-    ...availableSports.map(sport =>
-      fetchTraditionalGames(sport, today).catch(e =>
-        logger.error({ error: e, sport }, 'Failed to fetch')
-      )
-    ),
-    fetchMMAEvents().catch(e => logger.error({ error: e }, 'Failed to fetch MMA')),
+    ...availableSports.map(sport => {
+      const cfg = SPORT_CONFIG[sport];
+      if (cfg.type === 'game') {
+        return fetchTraditionalGames(sport, today).catch(e =>
+          logger.error({ error: e, sport }, 'Failed to fetch games')
+        );
+      } else if (cfg.type === 'match') {
+        return fetchSoccerMatches(sport, today).catch(e =>
+          logger.error({ error: e, sport }, 'Failed to fetch matches')
+        );
+      } else if (cfg.type === 'esport') {
+        return fetchEsportsMatches(sport).catch(e =>
+          logger.error({ error: e, sport }, 'Failed to fetch esports')
+        );
+      }
+      return Promise.resolve();
+    }),
+    // MMA requires ALL-STAR tier - uncomment when upgraded
+    // fetchMMAEvents().catch(e => logger.error({ error: e }, 'Failed to fetch MMA')),
   ];
 
   await Promise.all(fetches);
