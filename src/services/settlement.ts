@@ -183,23 +183,39 @@ async function settleRound(
     });
 
     // Send notification to chat about settlement
-    if (payoutResults.length > 0) {
-      try {
-        const payoutLines = payoutResults.map((p) => {
-          const name = p.username ? `@${p.username}` : 'User';
-          return `  ${name}: ${p.payout.toFixed(4)} SOL`;
-        }).join('\n');
+    try {
+      // Build winners list
+      const winnerLines = payoutResults.map((p) => {
+        const name = p.username ? `@${p.username}` : 'User';
+        return `  ${name}: +${p.payout.toFixed(4)} SOL`;
+      }).join('\n');
 
-        await bot.api.sendMessage(
-          round.chatId.toString(),
-          `🎉 ${winningTeam} wins!\n\n` +
-          `${game.awayTeam} @ ${game.homeTeam}\n\n` +
-          `Payouts sent:\n${payoutLines}\n\n` +
-          `Thanks for using Bettr!`
-        );
-      } catch (notifyError) {
-        logger.warn({ error: notifyError, chatId: round.chatId }, 'Failed to send settlement notification');
+      // Build losers list
+      const losingWagers = round.wagers.filter((w) => w.teamPick !== winner && w.amount > BigInt(0));
+      const loserLines = losingWagers.map((w) => {
+        const name = w.user.username ? `@${w.user.username}` : 'User';
+        const lost = Number(w.amount) / LAMPORTS_PER_SOL;
+        return `  ${name}: -${lost.toFixed(4)} SOL`;
+      }).join('\n');
+
+      const losingTeam = winner === 'home' ? game.awayTeam : game.homeTeam;
+
+      let message = `🎉 ${winningTeam} wins!\n\n` +
+        `${game.awayTeam} @ ${game.homeTeam}\n\n`;
+
+      if (winnerLines) {
+        message += `Winners:\n${winnerLines}\n\n`;
       }
+
+      if (loserLines) {
+        message += `Losers:\n${loserLines}\n\n`;
+      }
+
+      message += `Thanks for using Bettr!`;
+
+      await bot.api.sendMessage(round.chatId.toString(), message);
+    } catch (notifyError) {
+      logger.warn({ error: notifyError, chatId: round.chatId }, 'Failed to send settlement notification');
     }
 
     logger.info({ roundId: round.id }, 'Round settled successfully');

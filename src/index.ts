@@ -7,8 +7,16 @@ import {
   mybetsCommand,
   walletCommand,
   potCommand,
+  challengeCommand,
 } from './bot/commands/index.js';
-import { handleGameSelection, handleTeamSelection } from './bot/callbacks/index.js';
+import {
+  handleGameSelection,
+  handleTeamSelection,
+  handleChallengeGameSelection,
+  handleChallengeTeamSelection,
+  handleChallengeAccept,
+  handleChallengeDecline,
+} from './bot/callbacks/index.js';
 import { startScheduler } from './services/scheduler.js';
 import { logger } from './utils/logger.js';
 
@@ -20,11 +28,16 @@ bot.command('bet', betCommand);
 bot.command('mybets', mybetsCommand);
 bot.command('wallet', walletCommand);
 bot.command('pot', potCommand);
+bot.command('challenge', challengeCommand);
 
 // Register callback handlers
 bot.callbackQuery(/^bet:game:/, handleGameSelection);
 bot.callbackQuery(/^bet:team:/, handleTeamSelection);
 bot.callbackQuery(/^game:/, handleGameSelection);
+bot.callbackQuery(/^challenge:game:/, handleChallengeGameSelection);
+bot.callbackQuery(/^challenge:team:/, handleChallengeTeamSelection);
+bot.callbackQuery(/^challenge:accept:/, handleChallengeAccept);
+bot.callbackQuery(/^challenge:decline:/, handleChallengeDecline);
 
 // Start bot
 async function main() {

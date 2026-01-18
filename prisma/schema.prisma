@@ -8,28 +8,31 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  telegramId    BigInt   @unique
-  username      String?
-  solanaAddress String?
-  createdAt     DateTime @default(now())
-  wagers        Wager[]
+  id                  String      @id @default(uuid())
+  telegramId          BigInt      @unique
+  username            String?
+  solanaAddress       String?
+  createdAt           DateTime    @default(now())
+  wagers              Wager[]
+  challengesSent      Challenge[] @relation("ChallengerChallenges")
+  challengesReceived  Challenge[] @relation("OpponentChallenges")
 }
 
 model Game {
-  id         String     @id @default(uuid())
-  externalId String     @unique
+  id         String      @id @default(uuid())
+  externalId String      @unique
   sport      Sport
   homeTeam   String
   awayTeam   String
   homeScore  Int?
   awayScore  Int?
   startTime  DateTime
-  status     GameStatus @default(SCHEDULED)
+  status     GameStatus  @default(SCHEDULED)
   winner     String?
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
   rounds     Round[]
+  challenges Challenge[]
 }
 
 model Round {
@@ -45,6 +48,7 @@ model Round {
   expiresAt       DateTime
   settledAt       DateTime?
   wagers          Wager[]
+  challenges      Challenge[]
 
   @@index([gameId])
   @@index([chatId])
@@ -72,6 +76,36 @@ model Treasury {
   id        String   @id @default(uuid())
   totalFees BigInt   @default(0)
   updatedAt DateTime @updatedAt
+}
+
+model Challenge {
+  id                String          @id @default(uuid())
+  gameId            String
+  game              Game            @relation(fields: [gameId], references: [id])
+  chatId            BigInt
+  challengerId      String
+  challenger        User            @relation("ChallengerChallenges", fields: [challengerId], references: [id])
+  challengerTeam    String          // "home" or "away"
+  opponentId        String
+  opponent          User            @relation("OpponentChallenges", fields: [opponentId], references: [id])
+  amount            BigInt          // Agreed amount in lamports
+  status            ChallengeStatus @default(PENDING)
+  roundId           String?         // Links to round once accepted
+  round             Round?          @relation(fields: [roundId], references: [id])
+  createdAt         DateTime        @default(now())
+  expiresAt         DateTime        // Challenge expires if not accepted
+
+  @@index([chatId])
+  @@index([challengerId])
+  @@index([opponentId])
+  @@index([status])
+}
+
+enum ChallengeStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
 }
 
 enum Sport {

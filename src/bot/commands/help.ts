@@ -14,6 +14,7 @@ Commands:
 /start - Register your account
 /games - View today's games
 /bet - Start or join a bet
+/challenge @user <amount> - Challenge someone 1v1
 /mybets - View your active bets
 /pot - View current pot in this chat
 /wallet <address> - Set your payout wallet

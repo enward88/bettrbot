@@ -8,6 +8,11 @@ const logger = createChildLogger('bot');
 interface SessionData {
   selectedGameId?: string;
   selectedTeam?: 'home' | 'away';
+  challengeData?: {
+    opponentId: string;
+    opponentUsername: string;
+    amount: string; // Stored as string to avoid BigInt serialization issues
+  };
 }
 
 // Custom context type
