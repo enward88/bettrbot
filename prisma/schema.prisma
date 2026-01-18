@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  telegramId    BigInt   @unique
+  username      String?
+  solanaAddress String?
+  createdAt     DateTime @default(now())
+  wagers        Wager[]
+}
+
+model Game {
+  id         String     @id @default(uuid())
+  externalId String     @unique
+  sport      Sport
+  homeTeam   String
+  awayTeam   String
+  homeScore  Int?
+  awayScore  Int?
+  startTime  DateTime
+  status     GameStatus @default(SCHEDULED)
+  winner     String?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  rounds     Round[]
+}
+
+model Round {
+  id              String      @id @default(uuid())
+  gameId          String
+  game            Game        @relation(fields: [gameId], references: [id])
+  chatId          BigInt
+  walletAddress   String      @unique
+  walletSecretKey String
+  status          RoundStatus @default(OPEN)
+  totalPot        BigInt      @default(0)
+  createdAt       DateTime    @default(now())
+  expiresAt       DateTime
+  settledAt       DateTime?
+  wagers          Wager[]
+
+  @@index([gameId])
+  @@index([chatId])
+  @@index([status])
+}
+
+model Wager {
+  id          String   @id @default(uuid())
+  roundId     String
+  round       Round    @relation(fields: [roundId], references: [id])
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  teamPick    String
+  amount      BigInt
+  txSignature String?
+  paidOut     Boolean  @default(false)
+  payoutTx    String?
+  createdAt   DateTime @default(now())
+
+  @@index([roundId])
+  @@index([userId])
+}
+
+model Treasury {
+  id        String   @id @default(uuid())
+  totalFees BigInt   @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+enum Sport {
+  NBA
+  NFL
+  NHL
+  NCAAF
+  MMA
+}
+
+enum GameStatus {
+  SCHEDULED
+  LIVE
+  FINAL
+  CANCELLED
+  POSTPONED
+}
+
+enum RoundStatus {
+  OPEN
+  LOCKED
+  SETTLED
+  CANCELLED
+}

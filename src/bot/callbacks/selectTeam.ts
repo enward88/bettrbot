@@ -1,0 +1,138 @@
+import { type BotContext } from '../bot.js';
+import { prisma } from '../../db/prisma.js';
+import { createRoundWallet } from '../../services/wallet.js';
+import { MIN_BET_SOL } from '../../utils/constants.js';
+import { createChildLogger } from '../../utils/logger.js';
+
+const logger = createChildLogger('cb:selectTeam');
+
+export async function handleTeamSelection(ctx: BotContext) {
+  const callbackData = ctx.callbackQuery?.data;
+  const telegramUser = ctx.from;
+
+  if (!callbackData?.startsWith('bet:team:') || !telegramUser) {
+    return;
+  }
+
+  const teamPick = callbackData.replace('bet:team:', '') as 'home' | 'away';
+  const gameId = ctx.session.selectedGameId;
+
+  if (!gameId) {
+    await ctx.answerCallbackQuery({ text: 'Session expired. Please start over with /bet' });
+    return;
+  }
+
+  try {
+    // Get game
+    const game = await prisma.game.findUnique({
+      where: { id: gameId },
+    });
+
+    if (!game) {
+      await ctx.answerCallbackQuery({ text: 'Game not found.' });
+      return;
+    }
+
+    // Get or create user
+    const user = await prisma.user.findUnique({
+      where: { telegramId: BigInt(telegramUser.id) },
+    });
+
+    if (!user) {
+      await ctx.answerCallbackQuery({ text: 'Please /start first to register.' });
+      return;
+    }
+
+    if (!user.solanaAddress) {
+      await ctx.editMessageText(
+        'You need to set your payout wallet first!\n\n' +
+          'Use /wallet <your-solana-address> to set it.'
+      );
+      await ctx.answerCallbackQuery();
+      return;
+    }
+
+    const chatId = ctx.chat?.id;
+    if (!chatId) {
+      await ctx.answerCallbackQuery({ text: 'Could not identify chat.' });
+      return;
+    }
+
+    // Find or create round for this game in this chat
+    let round = await prisma.round.findFirst({
+      where: {
+        gameId: game.id,
+        chatId: BigInt(chatId),
+        status: 'OPEN',
+      },
+    });
+
+    if (!round) {
+      // Create new round with unique wallet
+      const { address, encryptedSecretKey } = await createRoundWallet();
+
+      round = await prisma.round.create({
+        data: {
+          gameId: game.id,
+          chatId: BigInt(chatId),
+          walletAddress: address,
+          walletSecretKey: encryptedSecretKey,
+          expiresAt: game.startTime,
+        },
+      });
+
+      logger.info({ roundId: round.id, gameId, chatId }, 'Created new betting round');
+    }
+
+    // Check if user already has a wager in this round
+    const existingWager = await prisma.wager.findFirst({
+      where: {
+        roundId: round.id,
+        userId: user.id,
+      },
+    });
+
+    if (existingWager) {
+      const teamName = existingWager.teamPick === 'home' ? game.homeTeam : game.awayTeam;
+      await ctx.editMessageText(
+        `You already have a bet on ${teamName} in this round.\n\n` +
+          `Wallet: \`${round.walletAddress}\`\n\n` +
+          `Send more SOL to increase your wager.`,
+        { parse_mode: 'Markdown' }
+      );
+      await ctx.answerCallbackQuery();
+      return;
+    }
+
+    // Create pending wager (amount will be set when deposit is detected)
+    await prisma.wager.create({
+      data: {
+        roundId: round.id,
+        userId: user.id,
+        teamPick,
+        amount: BigInt(0), // Will be updated when deposit detected
+      },
+    });
+
+    const teamName = teamPick === 'home' ? game.homeTeam : game.awayTeam;
+
+    await ctx.editMessageText(
+      `Bet placed on ${teamName}!\n\n` +
+        `Send SOL to this wallet:\n\`${round.walletAddress}\`\n\n` +
+        `Minimum bet: ${MIN_BET_SOL} SOL\n\n` +
+        `Your wager will be confirmed once the deposit is detected.\n` +
+        `Bets lock when the game starts.`,
+      { parse_mode: 'Markdown' }
+    );
+
+    await ctx.answerCallbackQuery({ text: 'Bet registered! Send SOL to confirm.' });
+
+    logger.info(
+      { userId: user.id, roundId: round.id, teamPick },
+      'User placed bet'
+    );
+  } catch (error) {
+    logger.error({ error, gameId }, 'Failed to handle team selection');
+    await ctx.answerCallbackQuery({ text: 'Something went wrong. Please try again.' });
+  }
+}
