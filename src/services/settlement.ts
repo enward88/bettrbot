@@ -1,8 +1,9 @@
 import { prisma } from '../db/prisma.js';
-import { FEE_PERCENTAGE } from '../utils/constants.js';
+import { FEE_PERCENTAGE, LAMPORTS_PER_SOL } from '../utils/constants.js';
 import { config } from '../utils/config.js';
 import { sendSol, getWalletBalance } from './wallet.js';
 import { createChildLogger } from '../utils/logger.js';
+import { bot } from '../bot/bot.js';
 
 const logger = createChildLogger('settlement');
 
@@ -38,7 +39,7 @@ export async function settleCompletedGames(): Promise<void> {
   for (const game of games) {
     for (const round of game.rounds) {
       try {
-        await settleRound(round, game.winner!);
+        await settleRound(round, game.winner!, game);
       } catch (error) {
         logger.error({ error, roundId: round.id }, 'Failed to settle round');
       }
@@ -50,6 +51,7 @@ export async function settleCompletedGames(): Promise<void> {
 async function settleRound(
   round: {
     id: string;
+    chatId: bigint;
     walletAddress: string;
     walletSecretKey: string;
     wagers: Array<{
@@ -58,11 +60,13 @@ async function settleRound(
       amount: bigint;
       user: {
         id: string;
+        username: string | null;
         solanaAddress: string | null;
       };
     }>;
   },
-  winner: string
+  winner: string,
+  game: { homeTeam: string; awayTeam: string }
 ): Promise<void> {
   logger.info({ roundId: round.id, winner }, 'Settling round');
 
@@ -85,6 +89,7 @@ async function settleRound(
   // Find winning wagers
   const winningWagers = round.wagers.filter((w) => w.teamPick === winner);
   const totalWinningAmount = winningWagers.reduce((sum, w) => sum + w.amount, BigInt(0));
+  const winningTeam = winner === 'home' ? game.homeTeam : game.awayTeam;
 
   if (winningWagers.length === 0 || totalWinningAmount === BigInt(0)) {
     // No winners - this shouldn't happen normally
@@ -115,6 +120,7 @@ async function settleRound(
 
   // Calculate and send payouts to winners
   let payoutsSuccessful = true;
+  const payoutResults: Array<{ username: string | null; payout: number }> = [];
 
   for (const wager of winningWagers) {
     if (!wager.user.solanaAddress) {
@@ -150,6 +156,11 @@ async function settleRound(
         },
       });
 
+      payoutResults.push({
+        username: wager.user.username,
+        payout: Number(payout) / LAMPORTS_PER_SOL,
+      });
+
       logger.info(
         {
           wagerId: wager.id,
@@ -170,6 +181,26 @@ async function settleRound(
       where: { id: round.id },
       data: { status: 'SETTLED', settledAt: new Date() },
     });
+
+    // Send notification to chat about settlement
+    if (payoutResults.length > 0) {
+      try {
+        const payoutLines = payoutResults.map((p) => {
+          const name = p.username ? `@${p.username}` : 'User';
+          return `  ${name}: ${p.payout.toFixed(4)} SOL`;
+        }).join('\n');
+
+        await bot.api.sendMessage(
+          round.chatId.toString(),
+          `🎉 ${winningTeam} wins!\n\n` +
+          `${game.awayTeam} @ ${game.homeTeam}\n\n` +
+          `Payouts sent:\n${payoutLines}\n\n` +
+          `Thanks for using Bettr!`
+        );
+      } catch (notifyError) {
+        logger.warn({ error: notifyError, chatId: round.chatId }, 'Failed to send settlement notification');
+      }
+    }
 
     logger.info({ roundId: round.id }, 'Round settled successfully');
   }

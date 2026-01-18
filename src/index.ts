@@ -6,6 +6,7 @@ import {
   betCommand,
   mybetsCommand,
   walletCommand,
+  potCommand,
 } from './bot/commands/index.js';
 import { handleGameSelection, handleTeamSelection } from './bot/callbacks/index.js';
 import { startScheduler } from './services/scheduler.js';
@@ -18,6 +19,7 @@ bot.command('games', gamesCommand);
 bot.command('bet', betCommand);
 bot.command('mybets', mybetsCommand);
 bot.command('wallet', walletCommand);
+bot.command('pot', potCommand);
 
 // Register callback handlers
 bot.callbackQuery(/^bet:game:/, handleGameSelection);

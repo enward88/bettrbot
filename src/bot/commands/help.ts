@@ -15,6 +15,7 @@ Commands:
 /games - View today's games
 /bet - Start or join a bet
 /mybets - View your active bets
+/pot - View current pot in this chat
 /wallet <address> - Set your payout wallet
 /help - Show this help message
 

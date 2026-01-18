@@ -1,44 +1,148 @@
 import cron from 'node-cron';
 import { prisma } from '../db/prisma.js';
 import { refreshTodaysGames, checkGameResults } from './sports.js';
-import { getWalletBalance } from './wallet.js';
+import { getRecentTransactions, getConnection } from './wallet.js';
 import { settleCompletedGames } from './settlement.js';
 import { createChildLogger } from '../utils/logger.js';
+import { bot } from '../bot/bot.js';
+import { MIN_BET_LAMPORTS, LAMPORTS_PER_SOL } from '../utils/constants.js';
 
 const logger = createChildLogger('scheduler');
 
+// Track processed transactions to avoid duplicates
+const processedTxSignatures = new Set<string>();
+
 // Monitor wallets for deposits
 async function pollWalletDeposits(): Promise<void> {
-  // Get all open rounds
+  // Get all open rounds with their wagers
   const rounds = await prisma.round.findMany({
     where: { status: 'OPEN' },
     include: {
-      wagers: true,
+      wagers: {
+        include: {
+          user: true,
+        },
+      },
+      game: true,
     },
   });
 
   for (const round of rounds) {
     try {
-      const balance = await getWalletBalance(round.walletAddress);
+      // Get recent transactions to the wallet
+      const transactions = await getRecentTransactions(round.walletAddress, 20);
 
-      if (balance !== round.totalPot) {
-        // Balance changed - update and notify
-        await prisma.round.update({
-          where: { id: round.id },
-          data: { totalPot: balance },
+      for (const tx of transactions) {
+        // Skip if already processed
+        if (processedTxSignatures.has(tx.signature)) {
+          continue;
+        }
+
+        // Get transaction details to find deposit amount
+        const conn = getConnection();
+        const txDetails = await conn.getTransaction(tx.signature, {
+          maxSupportedTransactionVersion: 0,
         });
 
-        logger.info(
-          {
-            roundId: round.id,
-            oldBalance: round.totalPot.toString(),
-            newBalance: balance.toString(),
-          },
-          'Wallet balance changed'
+        if (!txDetails || !txDetails.meta) {
+          continue;
+        }
+
+        // Find the deposit amount by checking account balance changes
+        const accountKeys = txDetails.transaction.message.getAccountKeys().staticAccountKeys;
+        let depositAmount = BigInt(0);
+
+        for (let i = 0; i < accountKeys.length; i++) {
+          const key = accountKeys[i];
+          if (key && key.toBase58() === round.walletAddress) {
+            const pre = BigInt(txDetails.meta.preBalances[i] ?? 0);
+            const post = BigInt(txDetails.meta.postBalances[i] ?? 0);
+            if (post > pre) {
+              depositAmount = post - pre;
+            }
+            break;
+          }
+        }
+
+        if (depositAmount < MIN_BET_LAMPORTS) {
+          processedTxSignatures.add(tx.signature);
+          continue;
+        }
+
+        // Find a pending wager (amount = 0) without a tx signature to assign this to
+        const pendingWager = round.wagers.find(
+          (w) => w.amount === BigInt(0) && !w.txSignature
         );
 
-        // TODO: Update wager amounts based on detected deposits
-        // This requires tracking individual deposits via transaction signatures
+        if (pendingWager) {
+          // Update the wager with the deposit
+          await prisma.wager.update({
+            where: { id: pendingWager.id },
+            data: {
+              amount: depositAmount,
+              txSignature: tx.signature,
+            },
+          });
+
+          // Update round total
+          const updatedRound = await prisma.round.update({
+            where: { id: round.id },
+            data: {
+              totalPot: { increment: depositAmount },
+            },
+          });
+
+          const solAmount = Number(depositAmount) / LAMPORTS_PER_SOL;
+          const teamName = pendingWager.teamPick === 'home'
+            ? round.game.homeTeam
+            : round.game.awayTeam;
+
+          // Notify the chat
+          try {
+            const username = pendingWager.user.username
+              ? `@${pendingWager.user.username}`
+              : 'Someone';
+
+            await bot.api.sendMessage(
+              round.chatId.toString(),
+              `${username} bet ${solAmount.toFixed(4)} SOL on ${teamName}!\n\n` +
+              `${round.game.awayTeam} @ ${round.game.homeTeam}\n` +
+              `Total pot: ${(Number(updatedRound.totalPot) / LAMPORTS_PER_SOL).toFixed(4)} SOL`
+            );
+          } catch (notifyError) {
+            logger.warn({ error: notifyError, chatId: round.chatId }, 'Failed to send deposit notification');
+          }
+
+          logger.info(
+            {
+              roundId: round.id,
+              wagerId: pendingWager.id,
+              amount: depositAmount.toString(),
+              txSignature: tx.signature,
+            },
+            'Deposit linked to wager'
+          );
+        } else {
+          // No pending wager - log and notify about unattributed deposit
+          logger.warn(
+            {
+              roundId: round.id,
+              amount: depositAmount.toString(),
+              txSignature: tx.signature,
+            },
+            'Deposit received but no pending wager to assign'
+          );
+
+          // Still update the round total
+          await prisma.round.update({
+            where: { id: round.id },
+            data: {
+              totalPot: { increment: depositAmount },
+            },
+          });
+        }
+
+        processedTxSignatures.add(tx.signature);
       }
     } catch (error) {
       logger.error({ error, roundId: round.id }, 'Failed to poll wallet');
@@ -55,6 +159,12 @@ async function lockExpiredRounds(): Promise<void> {
       status: 'OPEN',
       expiresAt: { lte: now },
     },
+    include: {
+      game: true,
+      wagers: {
+        where: { amount: { gt: 0 } },
+      },
+    },
   });
 
   for (const round of expiredRounds) {
@@ -62,6 +172,27 @@ async function lockExpiredRounds(): Promise<void> {
       where: { id: round.id },
       data: { status: 'LOCKED' },
     });
+
+    // Notify the chat that bets are locked
+    if (round.wagers.length > 0) {
+      try {
+        const homeWagers = round.wagers.filter((w) => w.teamPick === 'home');
+        const awayWagers = round.wagers.filter((w) => w.teamPick === 'away');
+        const homeTotalSol = homeWagers.reduce((sum, w) => sum + Number(w.amount), 0) / LAMPORTS_PER_SOL;
+        const awayTotalSol = awayWagers.reduce((sum, w) => sum + Number(w.amount), 0) / LAMPORTS_PER_SOL;
+
+        await bot.api.sendMessage(
+          round.chatId.toString(),
+          `🔒 Bets are LOCKED for ${round.game.awayTeam} @ ${round.game.homeTeam}!\n\n` +
+          `${round.game.homeTeam}: ${homeTotalSol.toFixed(4)} SOL (${homeWagers.length} bets)\n` +
+          `${round.game.awayTeam}: ${awayTotalSol.toFixed(4)} SOL (${awayWagers.length} bets)\n\n` +
+          `Total pot: ${(Number(round.totalPot) / LAMPORTS_PER_SOL).toFixed(4)} SOL\n\n` +
+          `Winners will be paid when the game ends!`
+        );
+      } catch (notifyError) {
+        logger.warn({ error: notifyError, chatId: round.chatId }, 'Failed to send lock notification');
+      }
+    }
 
     logger.info({ roundId: round.id }, 'Round locked (game started)');
   }
