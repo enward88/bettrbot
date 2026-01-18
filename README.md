@@ -57,100 +57,6 @@ Payout (after 1% fee):
 
 Bettr takes a **1% fee** on every settled bet. This is deducted from the pot before payouts.
 
-## Setup (Self-Hosted)
-
-### Prerequisites
-
-- Node.js 18+
-- PostgreSQL 14+
-- Telegram Bot Token (from @BotFather)
-- Solana RPC endpoint
-- BALLDONTLIE API key
-
-### Installation
-
-```bash
-# Clone the repo
-git clone https://github.com/enward88/bettrbot.git
-cd bettrbot
-
-# Install dependencies
-npm install
-
-# Set up environment
-cp .env.example .env
-# Edit .env with your values
-
-# Generate Prisma client
-npx prisma generate
-
-# Run database migrations
-npx prisma migrate dev
-
-# Start the bot
-npm run dev
-```
-
-### Environment Variables
-
-```bash
-TELEGRAM_BOT_TOKEN=       # From @BotFather
-DATABASE_URL=             # PostgreSQL connection string
-SOLANA_RPC_URL=           # Solana RPC endpoint
-SOLANA_NETWORK=devnet     # devnet or mainnet-beta
-TREASURY_WALLET_ADDRESS=  # Your fee collection wallet
-ENCRYPTION_KEY=           # 32-byte hex string for wallet encryption
-BALLDONTLIE_API_KEY=      # Sports data API key
-```
-
-### Production Deployment
-
-```bash
-# Build
-npm run build
-
-# Run with PM2
-pm2 start dist/index.js --name bettr
-```
-
-## Development
-
-```bash
-# Run in development mode (with hot reload)
-npm run dev
-
-# Type check
-npm run typecheck
-
-# Lint
-npm run lint
-
-# Run tests
-npm test
-```
-
-## Architecture
-
-```
-src/
-├── index.ts           # Entry point
-├── bot/
-│   ├── bot.ts         # grammY bot setup
-│   ├── commands/      # Command handlers (/start, /games, etc.)
-│   └── callbacks/     # Inline button handlers
-├── services/
-│   ├── sports.ts      # BALLDONTLIE API integration
-│   ├── wallet.ts      # Solana wallet operations
-│   ├── settlement.ts  # Payout calculations
-│   └── scheduler.ts   # Cron jobs
-├── db/
-│   └── prisma.ts      # Database client
-└── utils/
-    ├── config.ts      # Environment config
-    ├── logger.ts      # Logging
-    └── constants.ts   # App constants
-```
-
 ## Security
 
 - Round wallet private keys are encrypted at rest using AES-256-GCM
@@ -160,4 +66,6 @@ src/
 
 ## License
 
-MIT
+This software is proprietary and confidential. All rights reserved. See [LICENSE](LICENSE) for details.
+
+Unauthorized copying, forking, modification, or distribution is strictly prohibited.
