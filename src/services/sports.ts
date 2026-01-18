@@ -369,18 +369,14 @@ export async function refreshTodaysGames(): Promise<void> {
   const today = new Date();
   logger.info({ date: today.toISOString() }, 'Refreshing games for all sports');
 
-  // Sports available on BALLDONTLIE free tier
+  // Sports subscribed on BALLDONTLIE
+  // FREE: NBA, WNBA, EPL, MLB
+  // ALL-STAR: MMA (fetched separately)
   const availableSports: Sport[] = [
-    // Basketball
-    'NBA', 'WNBA', 'NCAAB',
-    // Football
-    'NFL', 'NCAAF',
-    // Soccer
-    'EPL', 'LALIGA', 'SERIEA', 'UCL', 'BUNDESLIGA', 'LIGUE1', 'MLS',
-    // Other
-    'MLB', 'NHL',
-    // Esports
-    'LOL', 'DOTA2', 'CS2',
+    'NBA',
+    'WNBA',
+    'MLB',
+    'EPL',
   ];
 
   // Fetch sequentially with small delay to avoid rate limiting
