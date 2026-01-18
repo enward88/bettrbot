@@ -3,7 +3,7 @@ import { prisma } from '../db/prisma.js';
 import { refreshTodaysGames, checkGameResults } from './sports.js';
 import { getRecentTransactions, getConnection } from './wallet.js';
 import { settleCompletedGames } from './settlement.js';
-import { settleHouseBets, cancelExpiredHouseBets, pollHouseBetWallets } from './houseBet.js';
+import { settleHouseBets, cancelExpiredHouseBets, pollHouseBetWallets, sweepSettledHouseBets } from './houseBet.js';
 import { createChildLogger } from '../utils/logger.js';
 import { bot } from '../bot/bot.js';
 import { MIN_BET_LAMPORTS, LAMPORTS_PER_SOL } from '../utils/constants.js';
@@ -234,6 +234,12 @@ export function startScheduler(): void {
   // Cancel expired pending house bets every 10 minutes
   cron.schedule('*/10 * * * *', async () => {
     await cancelExpiredHouseBets();
+  });
+
+  // Sweep settled house bet wallets to treasury daily at 4 AM
+  cron.schedule('0 4 * * *', async () => {
+    logger.info('Running daily house bet wallet sweep');
+    await sweepSettledHouseBets();
   });
 
   // Initial game refresh on startup

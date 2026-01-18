@@ -161,19 +161,89 @@ export async function settleHouseBets(): Promise<void> {
     },
   });
 
+  // First pass: determine results and calculate total needed for payouts
+  const betsToSettle: Array<{
+    bet: typeof games[0]['houseBets'][0];
+    game: typeof games[0];
+    result: HouseBetResult;
+    payoutNeeded: bigint; // Total payout to user (stake + profit for wins, stake for push)
+  }> = [];
+
   for (const game of games) {
     for (const bet of game.houseBets) {
-      try {
-        await settleHouseBet(bet, game);
-      } catch (error) {
-        logger.error({ error, houseBetId: bet.id }, 'Failed to settle house bet');
+      const result = determineHouseBetResult(bet, game);
+      if (result === null) continue;
+
+      let payoutNeeded = BigInt(0);
+      if (result === 'WIN') {
+        payoutNeeded = bet.potentialWin; // stake + profit
+      } else if (result === 'PUSH') {
+        payoutNeeded = bet.amount; // just stake
       }
+      // LOSS: no payout needed
+
+      betsToSettle.push({ bet, game, result, payoutNeeded });
+    }
+  }
+
+  if (betsToSettle.length === 0) return;
+
+  // Calculate total funds available across all these bets' deposit wallets
+  let totalAvailable = BigInt(0);
+  const walletBalances: Map<string, bigint> = new Map();
+
+  for (const { bet } of betsToSettle) {
+    if (bet.depositAddress) {
+      try {
+        const balance = await getWalletBalance(bet.depositAddress);
+        walletBalances.set(bet.id, balance);
+        totalAvailable += balance;
+      } catch (error) {
+        logger.error({ error, houseBetId: bet.id }, 'Failed to get wallet balance');
+        walletBalances.set(bet.id, BigInt(0));
+      }
+    }
+  }
+
+  // Calculate total payouts needed
+  const totalPayoutsNeeded = betsToSettle.reduce((sum, b) => sum + b.payoutNeeded, BigInt(0));
+  const txFeePerPayout = BigInt(5000);
+  const payoutCount = betsToSettle.filter(b => b.payoutNeeded > BigInt(0)).length;
+  const totalTxFees = txFeePerPayout * BigInt(payoutCount);
+
+  logger.info(
+    {
+      totalAvailable: totalAvailable.toString(),
+      totalPayoutsNeeded: totalPayoutsNeeded.toString(),
+      betsCount: betsToSettle.length,
+    },
+    'Settling house bets batch'
+  );
+
+  // Check if we have enough funds
+  const canPayAll = totalAvailable >= totalPayoutsNeeded + totalTxFees;
+
+  if (!canPayAll) {
+    logger.warn(
+      {
+        shortfall: (totalPayoutsNeeded + totalTxFees - totalAvailable).toString(),
+      },
+      'Insufficient funds in deposit wallets - will need treasury top-up for some payouts'
+    );
+  }
+
+  // Settle each bet
+  for (const { bet, game, result, payoutNeeded } of betsToSettle) {
+    try {
+      await settleHouseBetWithPool(bet, game, result, payoutNeeded, walletBalances, betsToSettle);
+    } catch (error) {
+      logger.error({ error, houseBetId: bet.id }, 'Failed to settle house bet');
     }
   }
 }
 
-// Settle a single house bet
-async function settleHouseBet(
+// Settle a single house bet using pooled funds from all settling bets
+async function settleHouseBetWithPool(
   bet: {
     id: string;
     chatId: bigint;
@@ -183,6 +253,8 @@ async function settleHouseBet(
     line: number | null;
     amount: bigint;
     potentialWin: bigint;
+    depositAddress: string | null;
+    depositSecretKey: string | null;
     user: {
       id: string;
       username: string | null;
@@ -197,62 +269,84 @@ async function settleHouseBet(
     winner: string | null;
     homeSpread: number | null;
     totalLine: number | null;
-  }
+  },
+  result: HouseBetResult,
+  payoutNeeded: bigint,
+  walletBalances: Map<string, bigint>,
+  allBets: Array<{ bet: typeof bet; result: HouseBetResult }>
 ): Promise<void> {
-  logger.info({ houseBetId: bet.id, betType: bet.betType, pick: bet.pick }, 'Settling house bet');
-
-  const result = determineHouseBetResult(bet, game);
-
-  if (result === null) {
-    logger.warn({ houseBetId: bet.id }, 'Could not determine bet result');
-    return;
-  }
+  logger.info({ houseBetId: bet.id, betType: bet.betType, pick: bet.pick, result }, 'Settling house bet');
 
   let payoutTx: string | null = null;
+  let amountPaid = BigInt(0);
 
-  if (result === 'WIN' && bet.user.solanaAddress) {
-    // Pay out winner from treasury
-    const payout = bet.potentialWin;
+  if (payoutNeeded > BigInt(0) && bet.user.solanaAddress) {
+    const txFee = BigInt(5000);
+    let remainingToPay = payoutNeeded;
 
-    if (payout > BigInt(5000)) {
-      try {
-        // Note: In production, this would need proper treasury wallet signing
-        // For now, we log it as needing manual payout or would use a stored treasury key
-        logger.info(
-          {
-            houseBetId: bet.id,
-            payout: payout.toString(),
-            recipient: bet.user.solanaAddress,
-          },
-          'House bet payout needed'
-        );
-
-        // TODO: Implement actual treasury payout when multisig is ready
-        // For now, mark as needing payout
-        payoutTx = 'PENDING_TREASURY_PAYOUT';
-      } catch (error) {
-        logger.error({ error, houseBetId: bet.id }, 'Failed to send house bet payout');
+    // First, try to pay from this bet's own wallet
+    if (bet.depositAddress && bet.depositSecretKey) {
+      const ownBalance = walletBalances.get(bet.id) ?? BigInt(0);
+      if (ownBalance > txFee) {
+        const payFromOwn = ownBalance - txFee > remainingToPay ? remainingToPay : ownBalance - txFee;
+        try {
+          payoutTx = await sendSol(bet.depositSecretKey, bet.user.solanaAddress, payFromOwn);
+          amountPaid += payFromOwn;
+          remainingToPay -= payFromOwn;
+          walletBalances.set(bet.id, ownBalance - payFromOwn - txFee);
+          logger.info({ houseBetId: bet.id, amount: payFromOwn.toString() }, 'Paid from own wallet');
+        } catch (error) {
+          logger.error({ error, houseBetId: bet.id }, 'Failed to pay from own wallet');
+        }
       }
     }
-  } else if (result === 'PUSH' && bet.user.solanaAddress) {
-    // Refund on push
-    const refund = bet.amount;
 
-    if (refund > BigInt(5000)) {
-      try {
-        logger.info(
-          {
-            houseBetId: bet.id,
-            refund: refund.toString(),
-            recipient: bet.user.solanaAddress,
-          },
-          'House bet push refund needed'
-        );
+    // If still need more, pull from losing bets' wallets
+    if (remainingToPay > BigInt(0)) {
+      for (const other of allBets) {
+        if (other.result !== 'LOSS') continue; // Only use loser wallets
+        if (!other.bet.depositAddress || !other.bet.depositSecretKey) continue;
+        if (other.bet.id === bet.id) continue;
 
-        payoutTx = 'PENDING_TREASURY_REFUND';
-      } catch (error) {
-        logger.error({ error, houseBetId: bet.id }, 'Failed to send house bet refund');
+        const otherBalance = walletBalances.get(other.bet.id) ?? BigInt(0);
+        if (otherBalance <= txFee) continue;
+
+        const available = otherBalance - txFee;
+        const toTransfer = available > remainingToPay ? remainingToPay : available;
+
+        try {
+          const tx = await sendSol(other.bet.depositSecretKey, bet.user.solanaAddress, toTransfer);
+          amountPaid += toTransfer;
+          remainingToPay -= toTransfer;
+          walletBalances.set(other.bet.id, otherBalance - toTransfer - txFee);
+          logger.info(
+            {
+              from: other.bet.id,
+              to: bet.id,
+              amount: toTransfer.toString(),
+              tx,
+            },
+            'Transferred from loser wallet to winner'
+          );
+
+          if (remainingToPay <= BigInt(0)) break;
+        } catch (error) {
+          logger.error({ error, fromBet: other.bet.id }, 'Failed to transfer from loser wallet');
+        }
       }
+    }
+
+    // If still short, flag for manual treasury payout
+    if (remainingToPay > BigInt(0)) {
+      logger.warn(
+        {
+          houseBetId: bet.id,
+          shortfall: remainingToPay.toString(),
+          recipient: bet.user.solanaAddress,
+        },
+        'MANUAL TREASURY PAYOUT NEEDED - insufficient funds in pool'
+      );
+      payoutTx = payoutTx ? `${payoutTx}|TREASURY_OWES_${remainingToPay}` : `TREASURY_OWES_${remainingToPay}`;
     }
   }
 
@@ -271,12 +365,21 @@ async function settleHouseBet(
   try {
     const betDescription = formatBetDescription(bet, game);
     const resultEmoji = result === 'WIN' ? '🎉' : result === 'PUSH' ? '🔄' : '❌';
-    const resultText =
-      result === 'WIN'
-        ? `Won ${(Number(bet.potentialWin) / LAMPORTS_PER_SOL).toFixed(4)} SOL!`
-        : result === 'PUSH'
-        ? `Push - bet refunded (${(Number(bet.amount) / LAMPORTS_PER_SOL).toFixed(4)} SOL)`
-        : `Lost ${(Number(bet.amount) / LAMPORTS_PER_SOL).toFixed(4)} SOL`;
+    let resultText: string;
+
+    if (result === 'WIN') {
+      const paidSol = Number(amountPaid) / LAMPORTS_PER_SOL;
+      const owedSol = Number(payoutNeeded - amountPaid) / LAMPORTS_PER_SOL;
+      if (amountPaid >= payoutNeeded) {
+        resultText = `Won ${(Number(bet.potentialWin) / LAMPORTS_PER_SOL).toFixed(4)} SOL!`;
+      } else {
+        resultText = `Won! Paid ${paidSol.toFixed(4)} SOL, ${owedSol.toFixed(4)} SOL pending`;
+      }
+    } else if (result === 'PUSH') {
+      resultText = `Push - bet refunded (${(Number(bet.amount) / LAMPORTS_PER_SOL).toFixed(4)} SOL)`;
+    } else {
+      resultText = `Lost ${(Number(bet.amount) / LAMPORTS_PER_SOL).toFixed(4)} SOL`;
+    }
 
     const username = bet.user.username ? `@${bet.user.username}` : 'Bettor';
 
@@ -291,7 +394,7 @@ async function settleHouseBet(
     logger.warn({ error: notifyError, chatId: bet.chatId }, 'Failed to send house bet notification');
   }
 
-  logger.info({ houseBetId: bet.id, result }, 'House bet settled');
+  logger.info({ houseBetId: bet.id, result, amountPaid: amountPaid.toString() }, 'House bet settled');
 }
 
 // Determine the result of a house bet
@@ -546,52 +649,46 @@ export async function pollHouseBetWallets(): Promise<void> {
           'House bet deposit detected'
         );
 
-        // Sweep funds to treasury
-        const sweepTx = await sweepToTreasury(bet.depositAddress, bet.depositSecretKey, balance);
+        // Just mark as ACTIVE - funds stay in deposit wallet until settlement
+        await prisma.houseBet.update({
+          where: { id: bet.id },
+          data: {
+            status: 'ACTIVE',
+          },
+        });
 
-        if (sweepTx) {
-          // Update bet status to ACTIVE
-          await prisma.houseBet.update({
-            where: { id: bet.id },
-            data: {
-              txSignature: sweepTx,
-              status: 'ACTIVE',
-            },
-          });
+        // Notify user
+        try {
+          const amountSol = Number(bet.amount) / LAMPORTS_PER_SOL;
+          const potentialWinSol = Number(bet.potentialWin) / LAMPORTS_PER_SOL;
 
-          // Notify user
-          try {
-            const amountSol = Number(bet.amount) / LAMPORTS_PER_SOL;
-            const potentialWinSol = Number(bet.potentialWin) / LAMPORTS_PER_SOL;
-
-            let betDescription: string;
-            if (bet.betType === 'MONEYLINE') {
-              const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
-              betDescription = `${team} ML (${formatOdds(bet.odds)})`;
-            } else if (bet.betType === 'TOTAL_OVER') {
-              betDescription = `Over ${bet.line} (${formatOdds(bet.odds)})`;
-            } else if (bet.betType === 'TOTAL_UNDER') {
-              betDescription = `Under ${bet.line} (${formatOdds(bet.odds)})`;
-            } else {
-              const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
-              betDescription = `${team} ${bet.line} (${formatOdds(bet.odds)})`;
-            }
-
-            const username = bet.user.username ? `@${bet.user.username}` : 'Bettor';
-            await bot.api.sendMessage(
-              bet.chatId.toString(),
-              `✅ House Bet Confirmed!\n\n` +
-                `${username}'s bet on ${bet.game.awayTeam} @ ${bet.game.homeTeam}:\n` +
-                `${betDescription}\n` +
-                `Amount: ${amountSol.toFixed(4)} SOL\n` +
-                `Potential win: ${potentialWinSol.toFixed(4)} SOL`
-            );
-          } catch (notifyError) {
-            logger.warn({ error: notifyError, houseBetId: bet.id }, 'Failed to send deposit confirmation');
+          let betDescription: string;
+          if (bet.betType === 'MONEYLINE') {
+            const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
+            betDescription = `${team} ML (${formatOdds(bet.odds)})`;
+          } else if (bet.betType === 'TOTAL_OVER') {
+            betDescription = `Over ${bet.line} (${formatOdds(bet.odds)})`;
+          } else if (bet.betType === 'TOTAL_UNDER') {
+            betDescription = `Under ${bet.line} (${formatOdds(bet.odds)})`;
+          } else {
+            const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
+            betDescription = `${team} ${bet.line} (${formatOdds(bet.odds)})`;
           }
 
-          logger.info({ houseBetId: bet.id, sweepTx }, 'House bet activated and swept to treasury');
+          const username = bet.user.username ? `@${bet.user.username}` : 'Bettor';
+          await bot.api.sendMessage(
+            bet.chatId.toString(),
+            `✅ House Bet Confirmed!\n\n` +
+              `${username}'s bet on ${bet.game.awayTeam} @ ${bet.game.homeTeam}:\n` +
+              `${betDescription}\n` +
+              `Amount: ${amountSol.toFixed(4)} SOL\n` +
+              `Potential win: ${potentialWinSol.toFixed(4)} SOL`
+          );
+        } catch (notifyError) {
+          logger.warn({ error: notifyError, houseBetId: bet.id }, 'Failed to send deposit confirmation');
         }
+
+        logger.info({ houseBetId: bet.id }, 'House bet activated');
       }
     } catch (error) {
       logger.error({ error, houseBetId: bet.id }, 'Failed to poll house bet wallet');
@@ -599,37 +696,52 @@ export async function pollHouseBetWallets(): Promise<void> {
   }
 }
 
-// Sweep funds from deposit wallet to treasury
-async function sweepToTreasury(
-  depositAddress: string,
-  depositSecretKey: string,
-  balance: bigint
-): Promise<string | null> {
-  // Leave enough for rent (0.001 SOL = 1,000,000 lamports should be enough for tx fee)
-  const txFee = BigInt(5000); // 0.000005 SOL tx fee
-  const sweepAmount = balance - txFee;
+// Sweep settled bet wallets to treasury (run daily)
+export async function sweepSettledHouseBets(): Promise<void> {
+  // Find all settled bets that haven't been swept yet (no payoutTx or payoutTx is a sweep tx)
+  const settledBets = await prisma.houseBet.findMany({
+    where: {
+      status: 'SETTLED',
+      depositAddress: { not: null },
+      depositSecretKey: { not: null },
+    },
+  });
 
-  if (sweepAmount <= BigInt(0)) {
-    logger.warn({ depositAddress, balance: balance.toString() }, 'Balance too low to sweep');
-    return null;
+  if (settledBets.length === 0) {
+    return;
   }
 
-  try {
-    const txSignature = await sendSol(depositSecretKey, config.TREASURY_WALLET_ADDRESS, sweepAmount);
+  logger.info({ count: settledBets.length }, 'Sweeping settled house bet wallets');
 
-    logger.info(
-      {
-        from: depositAddress,
-        to: config.TREASURY_WALLET_ADDRESS,
-        amount: sweepAmount.toString(),
-        txSignature,
-      },
-      'Swept house bet deposit to treasury'
-    );
+  for (const bet of settledBets) {
+    if (!bet.depositAddress || !bet.depositSecretKey) continue;
 
-    return txSignature;
-  } catch (error) {
-    logger.error({ error, depositAddress }, 'Failed to sweep to treasury');
-    return null;
+    try {
+      const balance = await getWalletBalance(bet.depositAddress);
+
+      // Skip if wallet is empty or near-empty
+      if (balance <= BigInt(10000)) {
+        continue;
+      }
+
+      const txFee = BigInt(5000);
+      const sweepAmount = balance - txFee;
+
+      if (sweepAmount <= BigInt(0)) continue;
+
+      const txSignature = await sendSol(bet.depositSecretKey, config.TREASURY_WALLET_ADDRESS, sweepAmount);
+
+      logger.info(
+        {
+          houseBetId: bet.id,
+          from: bet.depositAddress,
+          amount: sweepAmount.toString(),
+          txSignature,
+        },
+        'Swept settled house bet to treasury'
+      );
+    } catch (error) {
+      logger.error({ error, houseBetId: bet.id }, 'Failed to sweep settled house bet');
+    }
   }
 }
