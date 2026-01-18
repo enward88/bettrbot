@@ -370,11 +370,14 @@ export async function refreshTodaysGames(): Promise<void> {
   const availableSports: Sport[] = ['NBA', 'NFL'];
 
   // Fetch all in parallel with error handling for each
-  const fetches = availableSports.map(sport =>
-    fetchTraditionalGames(sport, today).catch(e =>
-      logger.error({ error: e, sport }, 'Failed to fetch')
-    )
-  );
+  const fetches = [
+    ...availableSports.map(sport =>
+      fetchTraditionalGames(sport, today).catch(e =>
+        logger.error({ error: e, sport }, 'Failed to fetch')
+      )
+    ),
+    fetchMMAEvents().catch(e => logger.error({ error: e }, 'Failed to fetch MMA')),
+  ];
 
   await Promise.all(fetches);
 
