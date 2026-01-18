@@ -22,6 +22,9 @@ const envSchema = z.object({
   // Odds API (the-odds-api.com)
   ODDS_API_KEY: z.string().default(''),
 
+  // Admin notifications (your Telegram user ID for manual payout alerts)
+  ADMIN_TELEGRAM_ID: z.string().default(''),
+
   // Optional
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),

@@ -9,6 +9,21 @@ import type { BetType, HouseBetResult } from '@prisma/client';
 
 const logger = createChildLogger('houseBet');
 
+// Send admin notification for manual actions needed
+async function notifyAdmin(message: string): Promise<void> {
+  if (!config.ADMIN_TELEGRAM_ID) {
+    logger.warn('ADMIN_TELEGRAM_ID not configured - cannot send admin notification');
+    return;
+  }
+
+  try {
+    await bot.api.sendMessage(config.ADMIN_TELEGRAM_ID, `🚨 BETTR ADMIN ALERT\n\n${message}`);
+    logger.info('Admin notification sent');
+  } catch (error) {
+    logger.error({ error }, 'Failed to send admin notification');
+  }
+}
+
 // Create a new house bet (user betting against treasury)
 export async function createHouseBet(params: {
   gameId: string;
@@ -336,8 +351,10 @@ async function settleHouseBetWithPool(
       }
     }
 
-    // If still short, flag for manual treasury payout
+    // If still short, flag for manual treasury payout and notify admin
     if (remainingToPay > BigInt(0)) {
+      const shortfallSol = Number(remainingToPay) / LAMPORTS_PER_SOL;
+
       logger.warn(
         {
           houseBetId: bet.id,
@@ -346,6 +363,18 @@ async function settleHouseBetWithPool(
         },
         'MANUAL TREASURY PAYOUT NEEDED - insufficient funds in pool'
       );
+
+      // Notify admin
+      await notifyAdmin(
+        `💸 MANUAL PAYOUT NEEDED\n\n` +
+        `Bet ID: ${bet.id.slice(0, 8)}\n` +
+        `User: ${bet.user.username ? `@${bet.user.username}` : bet.user.id.slice(0, 8)}\n` +
+        `Amount owed: ${shortfallSol.toFixed(4)} SOL\n` +
+        `Send to: ${bet.user.solanaAddress}\n\n` +
+        `Game: ${game.awayTeam} @ ${game.homeTeam}\n` +
+        `Result: ${result}`
+      );
+
       payoutTx = payoutTx ? `${payoutTx}|TREASURY_OWES_${remainingToPay}` : `TREASURY_OWES_${remainingToPay}`;
     }
   }
@@ -361,19 +390,28 @@ async function settleHouseBetWithPool(
     },
   });
 
-  // Send notification
+  // Send notification to user
   try {
     const betDescription = formatBetDescription(bet, game);
     const resultEmoji = result === 'WIN' ? '🎉' : result === 'PUSH' ? '🔄' : '❌';
     let resultText: string;
+    let pendingNote = '';
 
     if (result === 'WIN') {
-      const paidSol = Number(amountPaid) / LAMPORTS_PER_SOL;
-      const owedSol = Number(payoutNeeded - amountPaid) / LAMPORTS_PER_SOL;
+      const owedAmount = payoutNeeded - amountPaid;
       if (amountPaid >= payoutNeeded) {
         resultText = `Won ${(Number(bet.potentialWin) / LAMPORTS_PER_SOL).toFixed(4)} SOL!`;
+      } else if (amountPaid > BigInt(0)) {
+        // Partial payout
+        const paidSol = Number(amountPaid) / LAMPORTS_PER_SOL;
+        const owedSol = Number(owedAmount) / LAMPORTS_PER_SOL;
+        resultText = `Won ${(Number(bet.potentialWin) / LAMPORTS_PER_SOL).toFixed(4)} SOL!`;
+        pendingNote = `\n\n✅ ${paidSol.toFixed(4)} SOL sent\n⏳ ${owedSol.toFixed(4)} SOL being manually processed`;
       } else {
-        resultText = `Won! Paid ${paidSol.toFixed(4)} SOL, ${owedSol.toFixed(4)} SOL pending`;
+        // Full amount pending
+        const owedSol = Number(owedAmount) / LAMPORTS_PER_SOL;
+        resultText = `Won ${(Number(bet.potentialWin) / LAMPORTS_PER_SOL).toFixed(4)} SOL!`;
+        pendingNote = `\n\n⏳ Your payout of ${owedSol.toFixed(4)} SOL is being manually processed`;
       }
     } else if (result === 'PUSH') {
       resultText = `Push - bet refunded (${(Number(bet.amount) / LAMPORTS_PER_SOL).toFixed(4)} SOL)`;
@@ -387,7 +425,7 @@ async function settleHouseBetWithPool(
       `${resultEmoji} House Bet Settled\n\n` +
       `${username}'s bet:\n` +
       `${betDescription}\n\n` +
-      `Result: ${resultText}`;
+      `Result: ${resultText}${pendingNote}`;
 
     await bot.api.sendMessage(bet.chatId.toString(), message);
   } catch (notifyError) {
