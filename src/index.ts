@@ -17,6 +17,7 @@ import {
   handleChallengeAccept,
   handleChallengeDecline,
 } from './bot/callbacks/index.js';
+import { handleConversationalBet } from './bot/handlers/index.js';
 import { startScheduler } from './services/scheduler.js';
 import { logger } from './utils/logger.js';
 
@@ -38,6 +39,9 @@ bot.callbackQuery(/^challenge:game:/, handleChallengeGameSelection);
 bot.callbackQuery(/^challenge:team:/, handleChallengeTeamSelection);
 bot.callbackQuery(/^challenge:accept:/, handleChallengeAccept);
 bot.callbackQuery(/^challenge:decline:/, handleChallengeDecline);
+
+// Register conversational bet handler for @mentions
+bot.on('message:text', handleConversationalBet);
 
 // Start bot
 async function main() {

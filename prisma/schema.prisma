@@ -16,6 +16,7 @@ model User {
   wagers              Wager[]
   challengesSent      Challenge[] @relation("ChallengerChallenges")
   challengesReceived  Challenge[] @relation("OpponentChallenges")
+  houseBets           HouseBet[]
 }
 
 model Game {
@@ -29,10 +30,68 @@ model Game {
   startTime  DateTime
   status     GameStatus  @default(SCHEDULED)
   winner     String?
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-  rounds     Round[]
-  challenges Challenge[]
+  // Odds data (American format, e.g. -110, +150)
+  homeMoneyline   Int?
+  awayMoneyline   Int?
+  homeSpread      Float?
+  awaySpread      Float?
+  spreadOdds      Int?      // Usually -110
+  totalLine       Float?    // Over/under line
+  overOdds        Int?
+  underOdds       Int?
+  oddsUpdatedAt   DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  rounds          Round[]
+  challenges      Challenge[]
+  houseBets       HouseBet[]
+}
+
+// Bet types for house betting
+enum BetType {
+  MONEYLINE
+  SPREAD
+  TOTAL_OVER
+  TOTAL_UNDER
+}
+
+// Bets placed against the house (treasury)
+model HouseBet {
+  id            String    @id @default(uuid())
+  gameId        String
+  game          Game      @relation(fields: [gameId], references: [id])
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  chatId        BigInt
+  betType       BetType
+  pick          String    // "home", "away", "over", "under"
+  odds          Int       // The odds at time of bet (American format)
+  line          Float?    // Spread or total line at time of bet
+  amount        BigInt    // Wager amount in lamports
+  potentialWin  BigInt    // Calculated payout if won
+  txSignature   String?   // Deposit transaction
+  status        HouseBetStatus @default(PENDING)
+  result        HouseBetResult?
+  payoutTx      String?   // Payout transaction if won
+  createdAt     DateTime  @default(now())
+  settledAt     DateTime?
+
+  @@index([gameId])
+  @@index([userId])
+  @@index([status])
+}
+
+enum HouseBetStatus {
+  PENDING     // Waiting for deposit
+  ACTIVE      // Deposit confirmed, bet is live
+  SETTLED     // Game ended, bet resolved
+  CANCELLED   // Bet cancelled (no deposit, game cancelled, etc)
+}
+
+enum HouseBetResult {
+  WIN
+  LOSS
+  PUSH        // Tie on spread/total
 }
 
 model Round {
@@ -109,11 +168,29 @@ enum ChallengeStatus {
 }
 
 enum Sport {
+  // US Major Sports
   NBA
   NFL
   NHL
+  MLB
+  WNBA
+  // College
   NCAAF
+  NCAAB
+  // Combat Sports
   MMA
+  // Soccer
+  EPL
+  MLS
+  LALIGA
+  SERIEA
+  BUNDESLIGA
+  LIGUE1
+  UCL
+  // Esports
+  CS2
+  LOL
+  DOTA2
 }
 
 enum GameStatus {

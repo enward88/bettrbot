@@ -18,11 +18,63 @@ export const GAME_REFRESH_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 export const RESULT_POLL_INTERVAL_MS = 60_000; // 1 minute
 
 // All sports in schema
-export const SUPPORTED_SPORTS = ['NBA', 'NFL', 'NHL', 'NCAAF', 'MMA'] as const;
+export const SUPPORTED_SPORTS = [
+  // US Major Sports
+  'NBA', 'NFL', 'NHL', 'MLB', 'WNBA',
+  // College
+  'NCAAF', 'NCAAB',
+  // Combat Sports
+  'MMA',
+  // Soccer
+  'EPL', 'MLS', 'LALIGA', 'SERIEA', 'BUNDESLIGA', 'LIGUE1', 'UCL',
+  // Esports
+  'CS2', 'LOL', 'DOTA2',
+] as const;
 export type Sport = (typeof SUPPORTED_SPORTS)[number];
 
-// Sports available on free API tier
-export const FREE_TIER_SPORTS: Sport[] = ['NBA', 'NFL', 'MMA'];
+// Display names for sports
+export const SPORT_DISPLAY_NAMES: Record<Sport, string> = {
+  NBA: 'NBA',
+  NFL: 'NFL',
+  NHL: 'NHL',
+  MLB: 'MLB',
+  WNBA: 'WNBA',
+  NCAAF: 'College Football',
+  NCAAB: 'College Basketball',
+  MMA: 'MMA/UFC',
+  EPL: 'Premier League',
+  MLS: 'MLS',
+  LALIGA: 'La Liga',
+  SERIEA: 'Serie A',
+  BUNDESLIGA: 'Bundesliga',
+  LIGUE1: 'Ligue 1',
+  UCL: 'Champions League',
+  CS2: 'CS2',
+  LOL: 'League of Legends',
+  DOTA2: 'Dota 2',
+};
+
+// Sport emojis
+export const SPORT_EMOJIS: Record<Sport, string> = {
+  NBA: '🏀',
+  NFL: '🏈',
+  NHL: '🏒',
+  MLB: '⚾',
+  WNBA: '🏀',
+  NCAAF: '🏈',
+  NCAAB: '🏀',
+  MMA: '🥊',
+  EPL: '⚽',
+  MLS: '⚽',
+  LALIGA: '⚽',
+  SERIEA: '⚽',
+  BUNDESLIGA: '⚽',
+  LIGUE1: '⚽',
+  UCL: '⚽',
+  CS2: '🎮',
+  LOL: '🎮',
+  DOTA2: '🎮',
+};
 
 // How long before game start to lock bets (in milliseconds)
 export const BET_LOCK_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before game

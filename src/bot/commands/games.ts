@@ -1,18 +1,11 @@
 import { InlineKeyboard } from 'grammy';
 import { type BotContext } from '../bot.js';
 import { prisma } from '../../db/prisma.js';
-import { SUPPORTED_SPORTS } from '../../utils/constants.js';
+import { SUPPORTED_SPORTS, SPORT_EMOJIS } from '../../utils/constants.js';
+import { formatOdds } from '../../services/odds.js';
 import { createChildLogger } from '../../utils/logger.js';
 
 const logger = createChildLogger('cmd:games');
-
-const SPORT_EMOJIS: Record<string, string> = {
-  NBA: '🏀',
-  NFL: '🏈',
-  NHL: '🏒',
-  NCAAF: '🏈',
-  MMA: '🥊',
-};
 
 export async function gamesCommand(ctx: BotContext) {
   try {
@@ -81,7 +74,14 @@ export async function gamesCommand(ctx: BotContext) {
           timeZone: 'America/New_York',
         });
         const statusLabel = game.status === 'LIVE' ? ' 🔴 LIVE' : '';
-        message += `  ${game.awayTeam} @ ${game.homeTeam} - ${time} ET${statusLabel}\n`;
+
+        // Build odds display
+        let oddsStr = '';
+        if (game.homeMoneyline !== null && game.awayMoneyline !== null) {
+          oddsStr = ` [${formatOdds(game.awayMoneyline)}/${formatOdds(game.homeMoneyline)}]`;
+        }
+
+        message += `  ${game.awayTeam} @ ${game.homeTeam} - ${time} ET${statusLabel}${oddsStr}\n`;
       }
       message += '\n';
     }

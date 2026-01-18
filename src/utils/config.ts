@@ -19,6 +19,9 @@ const envSchema = z.object({
   // Sports API
   BALLDONTLIE_API_KEY: z.string().min(1, 'BALLDONTLIE_API_KEY is required'),
 
+  // Odds API (the-odds-api.com)
+  ODDS_API_KEY: z.string().default(''),
+
   // Optional
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),

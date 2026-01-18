@@ -1,34 +1,40 @@
 import { type BotContext } from '../bot.js';
 
 export async function helpCommand(ctx: BotContext) {
-  const helpMessage = `Bettr - P2P Sports Betting
+  const botUsername = ctx.me?.username ?? 'bettrbot';
+
+  const helpMessage = `Bettr - Sports Betting
 
 How it works:
-1. Use /games to see today's matchups
-2. Pick a game and choose your team
-3. Send SOL to the generated wallet
-4. Others join and bet on the opposing team
-5. When the game ends, winners get paid automatically
+P2P Betting: Bet against others in your group
+House Betting: Bet against the house at posted odds
 
 Commands:
 /start - Register your account
-/games - View today's games
-/bet - Start or join a bet
+/games - View today's games with odds
+/bet - Start or join a P2P bet
 /challenge @user <amount> - Challenge someone 1v1
 /mybets - View your active bets
 /pot - View current pot in this chat
 /wallet <address> - Set your payout wallet
 /help - Show this help message
 
+Conversational Betting:
+Just @ me with your bet!
+@${botUsername} 1 sol Lakers ML
+@${botUsername} 0.5 sol Chiefs -3.5
+@${botUsername} 2 sol over 45.5 Patriots game
+
 Supported Sports:
-• NBA
-• NFL
-• College Football
-• NHL
-• MMA/UFC
+NBA, NFL, NHL, MLB, WNBA
+College Football & Basketball
+MMA/UFC
+Soccer (EPL, MLS, La Liga, Serie A, Bundesliga, Ligue 1, UCL)
+Esports (CS2, LoL, Dota 2)
 
 Fees:
-A 1% fee is taken from the pot on settled bets.
+1% fee on P2P bet settlements.
+House bets pay at posted odds.
 
 Tips:
 • Set your payout wallet before betting
