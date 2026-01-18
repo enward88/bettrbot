@@ -397,8 +397,7 @@ export async function refreshTodaysGames(): Promise<void> {
       }
       return Promise.resolve();
     }),
-    // MMA requires ALL-STAR tier - uncomment when upgraded
-    // fetchMMAEvents().catch(e => logger.error({ error: e }, 'Failed to fetch MMA')),
+    fetchMMAEvents().catch(e => logger.error({ error: e }, 'Failed to fetch MMA')),
   ];
 
   await Promise.all(fetches);
