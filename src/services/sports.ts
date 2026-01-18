@@ -364,30 +364,17 @@ export async function refreshTodaysGames(): Promise<void> {
   const today = new Date();
   logger.info({ date: today.toISOString() }, 'Refreshing games for all sports');
 
-  // Traditional sports (fetch for today)
-  const traditionalSports: Sport[] = ['NBA', 'NFL', 'NHL', 'MLB', 'WNBA', 'NCAAF', 'NCAAB'];
-  const soccerSports: Sport[] = ['EPL', 'MLS', 'LALIGA', 'SERIEA', 'BUNDESLIGA', 'LIGUE1', 'UCL'];
-  const esportsSports: Sport[] = ['CS2', 'LOL', 'DOTA2'];
+  // Only fetch sports available on current BALLDONTLIE API tier
+  // NBA and NFL are on the free/basic tier
+  // Add more sports here when you upgrade your API tier
+  const availableSports: Sport[] = ['NBA', 'NFL'];
 
   // Fetch all in parallel with error handling for each
-  const fetches = [
-    ...traditionalSports.map(sport =>
-      fetchTraditionalGames(sport, today).catch(e =>
-        logger.error({ error: e, sport }, 'Failed to fetch')
-      )
-    ),
-    ...soccerSports.map(sport =>
-      fetchSoccerMatches(sport, today).catch(e =>
-        logger.error({ error: e, sport }, 'Failed to fetch')
-      )
-    ),
-    fetchMMAEvents().catch(e => logger.error({ error: e }, 'Failed to fetch MMA')),
-    ...esportsSports.map(sport =>
-      fetchEsportsMatches(sport).catch(e =>
-        logger.error({ error: e, sport }, 'Failed to fetch')
-      )
-    ),
-  ];
+  const fetches = availableSports.map(sport =>
+    fetchTraditionalGames(sport, today).catch(e =>
+      logger.error({ error: e, sport }, 'Failed to fetch')
+    )
+  );
 
   await Promise.all(fetches);
 
