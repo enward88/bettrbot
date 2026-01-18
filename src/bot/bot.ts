@@ -5,13 +5,18 @@ import { createChildLogger } from '../utils/logger.js';
 const logger = createChildLogger('bot');
 
 // Session data interface
-interface SessionData {
+export interface SessionData {
   selectedGameId?: string;
   selectedTeam?: 'home' | 'away';
   challengeData?: {
     opponentId: string;
     opponentUsername: string;
     amount: string; // Stored as string to avoid BigInt serialization issues
+  };
+  pendingHouseBet?: {
+    gameId: string;
+    betType: 'MONEYLINE' | 'SPREAD' | 'TOTAL_OVER' | 'TOTAL_UNDER';
+    pick: string;
   };
 }
 

@@ -16,6 +16,8 @@ import {
   handleChallengeTeamSelection,
   handleChallengeAccept,
   handleChallengeDecline,
+  handleHouseBetSelection,
+  handleHouseBetAmount,
 } from './bot/callbacks/index.js';
 import { handleConversationalBet } from './bot/handlers/index.js';
 import { startScheduler } from './services/scheduler.js';
@@ -39,9 +41,19 @@ bot.callbackQuery(/^challenge:game:/, handleChallengeGameSelection);
 bot.callbackQuery(/^challenge:team:/, handleChallengeTeamSelection);
 bot.callbackQuery(/^challenge:accept:/, handleChallengeAccept);
 bot.callbackQuery(/^challenge:decline:/, handleChallengeDecline);
+bot.callbackQuery(/^house:/, handleHouseBetSelection);
 
-// Register conversational bet handler for @mentions
-bot.on('message:text', handleConversationalBet);
+// Register text handlers
+bot.on('message:text', async (ctx, next) => {
+  // Check for pending house bet amount first
+  if (ctx.session.pendingHouseBet) {
+    await handleHouseBetAmount(ctx);
+    return;
+  }
+  // Otherwise try conversational betting
+  await handleConversationalBet(ctx);
+  await next();
+});
 
 // Start bot
 async function main() {

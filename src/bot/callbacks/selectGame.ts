@@ -1,6 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { type BotContext } from '../bot.js';
 import { prisma } from '../../db/prisma.js';
+import { formatOdds } from '../../services/odds.js';
 import { createChildLogger } from '../../utils/logger.js';
 
 const logger = createChildLogger('cb:selectGame');
@@ -45,11 +46,6 @@ export async function handleGameSelection(ctx: BotContext) {
     // Store selected game in session
     ctx.session.selectedGameId = gameId;
 
-    // Show team selection
-    const keyboard = new InlineKeyboard()
-      .text(`${game.awayTeam} (Away)`, `bet:team:away`)
-      .text(`${game.homeTeam} (Home)`, `bet:team:home`);
-
     const gameTime = game.startTime.toLocaleString('en-US', {
       weekday: 'short',
       month: 'short',
@@ -59,13 +55,49 @@ export async function handleGameSelection(ctx: BotContext) {
       hour12: true,
     });
 
-    await ctx.editMessageText(
-      `${game.awayTeam} @ ${game.homeTeam}\n` +
-        `${gameTime}\n\n` +
-        `Select your team:`,
-      { reply_markup: keyboard }
-    );
+    // Build keyboard with both P2P and House betting options
+    const keyboard = new InlineKeyboard();
 
+    // P2P betting options
+    keyboard
+      .text(`${game.awayTeam}`, `bet:team:away`)
+      .text(`${game.homeTeam}`, `bet:team:home`)
+      .row();
+
+    // House betting options (if odds available)
+    const hasMoneyline = game.homeMoneyline !== null && game.awayMoneyline !== null;
+    const hasTotals = game.totalLine !== null && game.overOdds !== null && game.underOdds !== null;
+
+    if (hasMoneyline) {
+      keyboard
+        .text(`${game.awayTeam} ML (${formatOdds(game.awayMoneyline!)})`, `house:ml:away:${gameId}`)
+        .text(`${game.homeTeam} ML (${formatOdds(game.homeMoneyline!)})`, `house:ml:home:${gameId}`)
+        .row();
+    }
+
+    if (hasTotals) {
+      keyboard
+        .text(`Over ${game.totalLine} (${formatOdds(game.overOdds!)})`, `house:over:${gameId}`)
+        .text(`Under ${game.totalLine} (${formatOdds(game.underOdds!)})`, `house:under:${gameId}`)
+        .row();
+    }
+
+    // Build message
+    let message = `${game.awayTeam} @ ${game.homeTeam}\n${gameTime}\n\n`;
+    message += `P2P Bet (bet against others):\n`;
+    message += `Pick a team above\n\n`;
+
+    if (hasMoneyline || hasTotals) {
+      message += `House Bet (bet at posted odds):\n`;
+      if (hasMoneyline) {
+        message += `Moneyline: ${game.awayTeam} ${formatOdds(game.awayMoneyline!)} | ${game.homeTeam} ${formatOdds(game.homeMoneyline!)}\n`;
+      }
+      if (hasTotals) {
+        message += `Total: O/U ${game.totalLine} (${formatOdds(game.overOdds!)}/${formatOdds(game.underOdds!)})\n`;
+      }
+    }
+
+    await ctx.editMessageText(message, { reply_markup: keyboard });
     await ctx.answerCallbackQuery();
   } catch (error) {
     logger.error({ error, gameId }, 'Failed to handle game selection');

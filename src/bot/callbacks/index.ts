@@ -6,3 +6,4 @@ export {
   handleChallengeAccept,
   handleChallengeDecline,
 } from './challenge.js';
+export { handleHouseBetSelection, handleHouseBetAmount } from './houseBet.js';
