@@ -1,9 +1,6 @@
 // Fee percentage taken from P2P bets (1%)
 export const FEE_PERCENTAGE = 0.01;
 
-// House edge on house bets (2%) - reduces payouts by this percentage
-export const HOUSE_EDGE_PERCENTAGE = 0.02;
-
 // Minimum bet amount in SOL
 export const MIN_BET_SOL = 0.01;
 

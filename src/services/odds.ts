@@ -1,7 +1,6 @@
 import { config } from '../utils/config.js';
 import { createChildLogger } from '../utils/logger.js';
 import { prisma } from '../db/prisma.js';
-import { HOUSE_EDGE_PERCENTAGE } from '../utils/constants.js';
 
 const logger = createChildLogger('odds');
 
@@ -243,7 +242,7 @@ export function formatOdds(odds: number): string {
   return odds.toString();
 }
 
-// Calculate potential payout from American odds (with house edge applied)
+// Calculate potential payout from American odds
 export function calculatePayout(amount: bigint, odds: number): bigint {
   let profit: bigint;
 
@@ -255,11 +254,7 @@ export function calculatePayout(amount: bigint, odds: number): bigint {
     profit = (amount * BigInt(100)) / BigInt(Math.abs(odds));
   }
 
-  // Apply house edge - reduce profit by HOUSE_EDGE_PERCENTAGE (2%)
-  const houseEdgeMultiplier = BigInt(Math.floor((1 - HOUSE_EDGE_PERCENTAGE) * 10000));
-  const adjustedProfit = (profit * houseEdgeMultiplier) / BigInt(10000);
-
-  return amount + adjustedProfit;
+  return amount + profit;
 }
 
 // Get all available sports from the odds API
