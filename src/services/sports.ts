@@ -158,7 +158,8 @@ async function fetchTraditionalGames(sport: Sport, date: Date): Promise<void> {
 
     logger.info({ sport, count: response.data.length, date: dateStr }, 'Updated games');
   } catch (error) {
-    logger.error({ error, sport, date: dateStr }, 'Failed to fetch games');
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errMsg, sport, date: dateStr }, 'Failed to fetch games');
   }
 }
 
@@ -201,7 +202,8 @@ async function fetchSoccerMatches(sport: Sport, date: Date): Promise<void> {
 
     logger.info({ sport, count: response.data.length, date: dateStr }, 'Updated matches');
   } catch (error) {
-    logger.error({ error, sport, date: dateStr }, 'Failed to fetch matches');
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errMsg, sport, date: dateStr }, 'Failed to fetch matches');
   }
 }
 
@@ -247,13 +249,15 @@ async function fetchMMAEvents(): Promise<void> {
 
         logger.info({ eventId: event.id, fights: fightsResponse.data.length }, 'Updated MMA fights');
       } catch (fightError) {
-        logger.error({ error: fightError, eventId: event.id }, 'Failed to fetch MMA fights');
+        const errMsg = fightError instanceof Error ? fightError.message : String(fightError);
+        logger.error({ error: errMsg, eventId: event.id }, 'Failed to fetch MMA fights');
       }
     }
 
     logger.info({ events: upcomingEvents.length }, 'Updated MMA events');
   } catch (error) {
-    logger.error({ error }, 'Failed to fetch MMA events');
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errMsg }, 'Failed to fetch MMA events');
   }
 }
 
@@ -296,7 +300,8 @@ async function fetchEsportsMatches(sport: Sport): Promise<void> {
 
     logger.info({ sport, count: upcoming.length }, 'Updated esports matches');
   } catch (error) {
-    logger.error({ error, sport }, 'Failed to fetch esports matches');
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errMsg, sport }, 'Failed to fetch esports matches');
   }
 }
 
