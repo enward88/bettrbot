@@ -8,11 +8,19 @@ const logger = createChildLogger('cb:selectGame');
 export async function handleGameSelection(ctx: BotContext) {
   const callbackData = ctx.callbackQuery?.data;
 
-  if (!callbackData?.startsWith('bet:game:')) {
+  if (!callbackData) {
     return;
   }
 
-  const gameId = callbackData.replace('bet:game:', '');
+  // Handle both 'bet:game:' and 'game:' prefixes
+  let gameId: string;
+  if (callbackData.startsWith('bet:game:')) {
+    gameId = callbackData.replace('bet:game:', '');
+  } else if (callbackData.startsWith('game:')) {
+    gameId = callbackData.replace('game:', '');
+  } else {
+    return;
+  }
 
   try {
     const game = await prisma.game.findUnique({
