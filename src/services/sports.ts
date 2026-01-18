@@ -370,13 +370,12 @@ export async function refreshTodaysGames(): Promise<void> {
   logger.info({ date: today.toISOString() }, 'Refreshing games for all sports');
 
   // Sports subscribed on BALLDONTLIE
-  // FREE: NBA, WNBA, EPL, MLB
+  // FREE: NBA, WNBA, MLB (EPL requires separate subscription despite being listed as free)
   // ALL-STAR: MMA (fetched separately)
   const availableSports: Sport[] = [
     'NBA',
     'WNBA',
     'MLB',
-    'EPL',
   ];
 
   // Fetch sequentially with small delay to avoid rate limiting
