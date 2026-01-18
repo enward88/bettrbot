@@ -526,6 +526,11 @@ export async function pollHouseBetWallets(): Promise<void> {
   logger.debug({ count: pendingBets.length }, 'Polling house bet wallets');
 
   for (const bet of pendingBets) {
+    // Skip bets without deposit wallet (legacy bets)
+    if (!bet.depositAddress || !bet.depositSecretKey) {
+      continue;
+    }
+
     try {
       const balance = await getWalletBalance(bet.depositAddress);
 

@@ -70,8 +70,8 @@ model HouseBet {
   amount          BigInt    // Wager amount in lamports
   potentialWin    BigInt    // Calculated payout if won
   // Unique deposit wallet per bet
-  depositAddress    String    @unique
-  depositSecretKey  String    // Encrypted - swept to treasury after confirmation
+  depositAddress    String?   @unique
+  depositSecretKey  String?   // Encrypted - swept to treasury after confirmation
   txSignature       String?   // Deposit transaction
   status            HouseBetStatus @default(PENDING)
   result            HouseBetResult?
