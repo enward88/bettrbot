@@ -33,3 +33,6 @@ coverage/
 # Misc
 *.tmp
 *.temp
+
+# Claude Code
+.claude/
