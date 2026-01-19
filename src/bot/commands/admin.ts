@@ -460,7 +460,7 @@ export async function adminTestGameCommand(ctx: BotContext) {
       `🧪 Test Game Created\n\n` +
         `Game ID: ${game.id.slice(0, 8)}\n` +
         `${game.awayTeam} @ ${game.homeTeam}\n` +
-        `Starts: ${startTime.toLocaleString()}\n\n` +
+        `Starts: ${startTime.toLocaleString('en-US', { timeZone: 'America/New_York' })} ET\n\n` +
         `Odds:\n` +
         `  ML: Away ${game.awayMoneyline} / Home ${game.homeMoneyline}\n` +
         `  Spread: Away +3.5 / Home -3.5\n` +

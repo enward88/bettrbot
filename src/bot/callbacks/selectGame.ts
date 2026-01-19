@@ -53,7 +53,8 @@ export async function handleGameSelection(ctx: BotContext) {
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
-    });
+      timeZone: 'America/New_York',
+    }) + ' ET';
 
     // Build keyboard with both P2P and House betting options
     const keyboard = new InlineKeyboard();

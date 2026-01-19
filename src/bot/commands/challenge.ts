@@ -136,8 +136,9 @@ export async function challengeCommand(ctx: BotContext) {
         hour: 'numeric',
         minute: '2-digit',
         hour12: true,
+        timeZone: 'America/New_York',
       });
-      const label = `${game.awayTeam} @ ${game.homeTeam} (${time})`;
+      const label = `${game.awayTeam} @ ${game.homeTeam} (${time} ET)`;
       keyboard.text(label, `challenge:game:${game.id}`).row();
     }
 

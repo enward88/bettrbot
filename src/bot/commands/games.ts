@@ -68,28 +68,30 @@ export async function gamesCommand(ctx: BotContext) {
       message += `${emoji} ${sport}\n`;
 
       for (const game of sportGames) {
-        // Format time for display - use user-friendly local time
-        // Show date if game is not today
-        const now = new Date();
-        const gameDate = game.startTime;
-        const isToday = gameDate.toDateString() === now.toDateString();
+        // Format time for display in Eastern Time (US sports focused)
+        const timeZone = 'America/New_York';
+        const nowET = new Date().toLocaleDateString('en-US', { timeZone });
+        const gameDateET = game.startTime.toLocaleDateString('en-US', { timeZone });
+        const isToday = nowET === gameDateET;
 
         const time = game.startTime.toLocaleTimeString('en-US', {
           hour: 'numeric',
           minute: '2-digit',
           hour12: true,
+          timeZone,
         });
 
         let dateTimeStr: string;
         if (isToday) {
-          dateTimeStr = `Today ${time}`;
+          dateTimeStr = `Today ${time} ET`;
         } else {
           const dayStr = game.startTime.toLocaleDateString('en-US', {
             weekday: 'short',
             month: 'short',
             day: 'numeric',
+            timeZone,
           });
-          dateTimeStr = `${dayStr} ${time}`;
+          dateTimeStr = `${dayStr} ${time} ET`;
         }
 
         const statusLabel = game.status === 'LIVE' ? ' 🔴 LIVE' : '';

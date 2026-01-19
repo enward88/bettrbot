@@ -66,6 +66,7 @@ export async function mybetsCommand(ctx: BotContext) {
         hour: 'numeric',
         minute: '2-digit',
         hour12: true,
+        timeZone: 'America/New_York',
       });
 
       message += `${game.awayTeam} @ ${game.homeTeam}\n`;
@@ -73,7 +74,7 @@ export async function mybetsCommand(ctx: BotContext) {
       message += `  Your wager: ${amountSol.toFixed(4)} SOL\n`;
       message += `  Total pot: ${potSol.toFixed(4)} SOL\n`;
       message += `  Status: ${status}\n`;
-      message += `  Game time: ${gameTime}\n\n`;
+      message += `  Game time: ${gameTime} ET\n\n`;
     }
 
     await ctx.reply(message);
