@@ -9,9 +9,16 @@ import { createChildLogger } from '../../utils/logger.js';
 const logger = createChildLogger('cmd:admin');
 
 // Check if user is admin
-function isAdmin(telegramId: bigint | number): boolean {
-  if (!config.ADMIN_TELEGRAM_ID) return false;
-  return config.ADMIN_TELEGRAM_ID === String(telegramId);
+function isAdmin(telegramId: bigint | number, logAttempt = true): boolean {
+  if (!config.ADMIN_TELEGRAM_ID) {
+    logger.error('ADMIN_TELEGRAM_ID not configured - rejecting admin command');
+    return false;
+  }
+  const isAdminUser = config.ADMIN_TELEGRAM_ID === String(telegramId);
+  if (!isAdminUser && logAttempt) {
+    logger.warn({ telegramId: String(telegramId) }, 'Unauthorized admin command attempt');
+  }
+  return isAdminUser;
 }
 
 export async function adminCommand(ctx: BotContext) {

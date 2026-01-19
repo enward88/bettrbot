@@ -4,9 +4,13 @@ export const FEE_PERCENTAGE = 0.01;
 // Minimum bet amount in SOL
 export const MIN_BET_SOL = 0.01;
 
+// Maximum bet amount in SOL (prevents catastrophic exposure)
+export const MAX_BET_SOL = 10;
+
 // Minimum bet amount in lamports (1 SOL = 1,000,000,000 lamports)
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const MIN_BET_LAMPORTS = MIN_BET_SOL * LAMPORTS_PER_SOL;
+export const MAX_BET_LAMPORTS = MAX_BET_SOL * LAMPORTS_PER_SOL;
 
 // Wallet polling interval in milliseconds
 export const WALLET_POLL_INTERVAL_MS = 30_000;

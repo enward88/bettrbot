@@ -5,7 +5,7 @@ import { createHouseBet, hasOddsForBetType } from '../../services/houseBet.js';
 import { formatOdds, calculatePayout } from '../../services/odds.js';
 import { createRoundWallet } from '../../services/wallet.js';
 import { createChildLogger } from '../../utils/logger.js';
-import { LAMPORTS_PER_SOL, MIN_BET_SOL, SPORT_EMOJIS, type Sport } from '../../utils/constants.js';
+import { LAMPORTS_PER_SOL, MIN_BET_SOL, MAX_BET_SOL, SPORT_EMOJIS, type Sport } from '../../utils/constants.js';
 import { config } from '../../utils/config.js';
 import type { BetType } from '@prisma/client';
 
@@ -280,9 +280,9 @@ export async function handleConversationalBet(ctx: BotContext): Promise<void> {
   }
 
   // Validate amount
-  if (parsed.amount < MIN_BET_SOL) {
+  if (parsed.amount < MIN_BET_SOL || parsed.amount > MAX_BET_SOL) {
     await ctx.reply(
-      `Minimum bet is ${MIN_BET_SOL} SOL.`,
+      `Bet must be between ${MIN_BET_SOL} and ${MAX_BET_SOL} SOL.`,
       { reply_to_message_id: message.message_id }
     );
     return;
