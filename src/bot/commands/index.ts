@@ -11,6 +11,7 @@ export {
   adminBetsCommand,
   adminPendingCommand,
   adminSettleCommand,
+  adminRefundCommand,
   adminExposureCommand,
   adminStatsCommand,
   handleAdminCallback,

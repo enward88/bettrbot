@@ -12,6 +12,7 @@ import {
   adminBetsCommand,
   adminPendingCommand,
   adminSettleCommand,
+  adminRefundCommand,
   adminExposureCommand,
   adminStatsCommand,
   handleAdminCallback,
@@ -55,6 +56,9 @@ bot.command('admin', async (ctx) => {
       break;
     case 'settle':
       await adminSettleCommand(ctx);
+      break;
+    case 'refund':
+      await adminRefundCommand(ctx);
       break;
     case 'exposure':
       await adminExposureCommand(ctx);

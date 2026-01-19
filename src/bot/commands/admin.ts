@@ -31,7 +31,8 @@ export async function adminCommand(ctx: BotContext) {
       'Commands:\n' +
       '/admin bets - View all active bets\n' +
       '/admin pending - View pending settlements\n' +
-      '/admin settle <betId> <result> - Manually settle a bet\n' +
+      '/admin settle <betId> <WIN|LOSS|PUSH> - Manually settle\n' +
+      '/admin refund <betId> - Cancel/refund a bet\n' +
       '/admin exposure - View house exposure\n' +
       '/admin stats - View betting statistics'
   );
@@ -355,6 +356,67 @@ export async function adminStatsCommand(ctx: BotContext) {
   } catch (error) {
     logger.error({ error }, 'Failed to fetch stats');
     await ctx.reply('Failed to load statistics.');
+  }
+}
+
+export async function adminRefundCommand(ctx: BotContext) {
+  const telegramUser = ctx.from;
+  if (!telegramUser || !isAdmin(telegramUser.id)) {
+    await ctx.reply('Unauthorized.');
+    return;
+  }
+
+  const text = ctx.message?.text || '';
+  const parts = text.split(/\s+/);
+  // /admin refund <betId>
+  if (parts.length < 3) {
+    await ctx.reply('Usage: /admin refund <betId>');
+    return;
+  }
+
+  const betIdPartial = parts[2];
+
+  try {
+    // Find bet by partial ID
+    const bet = await prisma.houseBet.findFirst({
+      where: {
+        id: { startsWith: betIdPartial },
+        status: { in: ['PENDING', 'ACTIVE'] },
+      },
+      include: { user: true, game: true },
+    });
+
+    if (!bet) {
+      await ctx.reply(`No pending/active bet found starting with "${betIdPartial}"`);
+      return;
+    }
+
+    // Mark as cancelled (refunded)
+    await prisma.houseBet.update({
+      where: { id: bet.id },
+      data: {
+        status: 'CANCELLED',
+        settledAt: new Date(),
+        payoutTx: `REFUND_ADMIN_${Date.now()}`,
+      },
+    });
+
+    const amountSol = Number(bet.amount) / LAMPORTS_PER_SOL;
+
+    await ctx.reply(
+      `🔄 Bet Refunded/Cancelled\n\n` +
+        `Bet ID: ${bet.id.slice(0, 8)}\n` +
+        `User: ${bet.user.username || bet.user.id.slice(0, 8)}\n` +
+        `Game: ${bet.game.awayTeam} @ ${bet.game.homeTeam}\n` +
+        `Amount: ${amountSol.toFixed(4)} SOL\n\n` +
+        `⚠️ If funds were deposited, refund manually from:\n` +
+        `${bet.depositAddress || 'N/A'}`
+    );
+
+    logger.info({ betId: bet.id, admin: telegramUser.id }, 'Bet refunded by admin');
+  } catch (error) {
+    logger.error({ error }, 'Failed to refund bet');
+    await ctx.reply('Failed to refund bet.');
   }
 }
 

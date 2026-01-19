@@ -262,20 +262,59 @@ export function startScheduler(): void {
 
 // Mark games as cancelled if they started 6+ hours ago but are still SCHEDULED
 // This handles cases where the API fails to update game status
+// Also cancels any associated bets that can't be settled
 async function cleanupStaleGames(): Promise<void> {
   const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
 
-  const staleGames = await prisma.game.updateMany({
+  // Find stale games first
+  const staleGameIds = await prisma.game.findMany({
     where: {
       status: 'SCHEDULED',
       startTime: { lt: sixHoursAgo },
     },
+    select: { id: true },
+  });
+
+  if (staleGameIds.length === 0) return;
+
+  const ids = staleGameIds.map((g) => g.id);
+
+  // Mark games as cancelled
+  await prisma.game.updateMany({
+    where: { id: { in: ids } },
+    data: { status: 'CANCELLED' },
+  });
+
+  // Cancel associated house bets (refund would require wallet access)
+  const cancelledBets = await prisma.houseBet.updateMany({
+    where: {
+      gameId: { in: ids },
+      status: { in: ['PENDING', 'ACTIVE'] },
+    },
     data: {
       status: 'CANCELLED',
+      settledAt: new Date(),
     },
   });
 
-  if (staleGames.count > 0) {
-    logger.info({ count: staleGames.count }, 'Marked stale scheduled games as cancelled');
-  }
+  // Cancel associated P2P rounds
+  const cancelledRounds = await prisma.round.updateMany({
+    where: {
+      gameId: { in: ids },
+      status: { in: ['OPEN', 'LOCKED'] },
+    },
+    data: {
+      status: 'CANCELLED',
+      settledAt: new Date(),
+    },
+  });
+
+  logger.info(
+    {
+      games: staleGameIds.length,
+      houseBets: cancelledBets.count,
+      rounds: cancelledRounds.count,
+    },
+    'Cleaned up stale games and cancelled associated bets'
+  );
 }
