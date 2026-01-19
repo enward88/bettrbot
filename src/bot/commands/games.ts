@@ -14,10 +14,11 @@ export async function gamesCommand(ctx: BotContext) {
     const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
     // Fetch games from database - upcoming scheduled games
+    // Use gt (greater than) to exclude games that have already started
     const games = await prisma.game.findMany({
       where: {
         startTime: {
-          gte: now,
+          gt: now,
           lt: next24Hours,
         },
         status: 'SCHEDULED',

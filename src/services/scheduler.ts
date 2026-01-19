@@ -242,10 +242,40 @@ export function startScheduler(): void {
     await sweepSettledHouseBets();
   });
 
+  // Mark stale games as cancelled (games that started 6+ hours ago but still SCHEDULED)
+  cron.schedule('0 * * * *', async () => {
+    await cleanupStaleGames();
+  });
+
   // Initial game refresh on startup
   refreshTodaysGames().catch((error) => {
     logger.error({ error }, 'Failed initial game refresh');
   });
 
+  // Initial stale game cleanup
+  cleanupStaleGames().catch((error) => {
+    logger.error({ error }, 'Failed initial stale game cleanup');
+  });
+
   logger.info('Scheduler started');
+}
+
+// Mark games as cancelled if they started 6+ hours ago but are still SCHEDULED
+// This handles cases where the API fails to update game status
+async function cleanupStaleGames(): Promise<void> {
+  const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+
+  const staleGames = await prisma.game.updateMany({
+    where: {
+      status: 'SCHEDULED',
+      startTime: { lt: sixHoursAgo },
+    },
+    data: {
+      status: 'CANCELLED',
+    },
+  });
+
+  if (staleGames.count > 0) {
+    logger.info({ count: staleGames.count }, 'Marked stale scheduled games as cancelled');
+  }
 }
