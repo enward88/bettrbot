@@ -15,6 +15,9 @@ import {
   adminRefundCommand,
   adminExposureCommand,
   adminStatsCommand,
+  adminTestGameCommand,
+  adminSimStartCommand,
+  adminSimEndCommand,
   handleAdminCallback,
 } from './bot/commands/index.js';
 import {
@@ -65,6 +68,15 @@ bot.command('admin', async (ctx) => {
       break;
     case 'stats':
       await adminStatsCommand(ctx);
+      break;
+    case 'testgame':
+      await adminTestGameCommand(ctx);
+      break;
+    case 'simstart':
+      await adminSimStartCommand(ctx);
+      break;
+    case 'simend':
+      await adminSimEndCommand(ctx);
       break;
     default:
       await adminCommand(ctx);

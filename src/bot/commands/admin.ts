@@ -34,7 +34,11 @@ export async function adminCommand(ctx: BotContext) {
       '/admin settle <betId> <WIN|LOSS|PUSH> - Manually settle\n' +
       '/admin refund <betId> - Cancel/refund a bet\n' +
       '/admin exposure - View house exposure\n' +
-      '/admin stats - View betting statistics'
+      '/admin stats - View betting statistics\n\n' +
+      'Test Commands:\n' +
+      '/admin testgame - Create a fake test game\n' +
+      '/admin simstart <gameId> - Simulate game starting (LIVE)\n' +
+      '/admin simend <gameId> <homeScore> <awayScore> - Simulate game ending'
   );
 }
 
@@ -417,6 +421,200 @@ export async function adminRefundCommand(ctx: BotContext) {
   } catch (error) {
     logger.error({ error }, 'Failed to refund bet');
     await ctx.reply('Failed to refund bet.');
+  }
+}
+
+// Create a fake test game for testing settlement
+export async function adminTestGameCommand(ctx: BotContext) {
+  const telegramUser = ctx.from;
+  if (!telegramUser || !isAdmin(telegramUser.id)) {
+    await ctx.reply('Unauthorized.');
+    return;
+  }
+
+  try {
+    // Create a test game starting in 1 hour
+    const startTime = new Date(Date.now() + 60 * 60 * 1000);
+
+    const game = await prisma.game.create({
+      data: {
+        externalId: `TEST_${Date.now()}`,
+        sport: 'NBA',
+        homeTeam: 'Test Home',
+        awayTeam: 'Test Away',
+        startTime,
+        status: 'SCHEDULED',
+        homeMoneyline: -110,
+        awayMoneyline: -110,
+        homeSpread: -3.5,
+        awaySpread: 3.5,
+        spreadOdds: -110,
+        totalLine: 220.5,
+        overOdds: -110,
+        underOdds: -110,
+        oddsUpdatedAt: new Date(),
+      },
+    });
+
+    await ctx.reply(
+      `🧪 Test Game Created\n\n` +
+        `Game ID: ${game.id.slice(0, 8)}\n` +
+        `${game.awayTeam} @ ${game.homeTeam}\n` +
+        `Starts: ${startTime.toLocaleString()}\n\n` +
+        `Odds:\n` +
+        `  ML: Away ${game.awayMoneyline} / Home ${game.homeMoneyline}\n` +
+        `  Spread: Away +3.5 / Home -3.5\n` +
+        `  Total: O/U 220.5\n\n` +
+        `Now place bets using: "bet X sol test home ML"\n\n` +
+        `Then simulate:\n` +
+        `/admin simstart ${game.id.slice(0, 8)}\n` +
+        `/admin simend ${game.id.slice(0, 8)} 110 108`
+    );
+
+    logger.info({ gameId: game.id }, 'Test game created by admin');
+  } catch (error) {
+    logger.error({ error }, 'Failed to create test game');
+    await ctx.reply('Failed to create test game.');
+  }
+}
+
+// Simulate game starting (set to LIVE)
+export async function adminSimStartCommand(ctx: BotContext) {
+  const telegramUser = ctx.from;
+  if (!telegramUser || !isAdmin(telegramUser.id)) {
+    await ctx.reply('Unauthorized.');
+    return;
+  }
+
+  const text = ctx.message?.text || '';
+  const parts = text.split(/\s+/);
+  if (parts.length < 3) {
+    await ctx.reply('Usage: /admin simstart <gameId>');
+    return;
+  }
+
+  const gameIdPartial = parts[2];
+
+  try {
+    const game = await prisma.game.findFirst({
+      where: {
+        id: { startsWith: gameIdPartial },
+      },
+      include: {
+        houseBets: { where: { status: { in: ['PENDING', 'ACTIVE'] } } },
+        rounds: { where: { status: { in: ['OPEN', 'LOCKED'] } } },
+      },
+    });
+
+    if (!game) {
+      await ctx.reply(`No game found starting with "${gameIdPartial}"`);
+      return;
+    }
+
+    // Update game to LIVE
+    await prisma.game.update({
+      where: { id: game.id },
+      data: { status: 'LIVE' },
+    });
+
+    // Lock any open rounds (simulating game start)
+    const lockedRounds = await prisma.round.updateMany({
+      where: {
+        gameId: game.id,
+        status: 'OPEN',
+      },
+      data: { status: 'LOCKED' },
+    });
+
+    await ctx.reply(
+      `🏀 Game Started (Simulated)\n\n` +
+        `${game.awayTeam} @ ${game.homeTeam}\n` +
+        `Status: LIVE\n\n` +
+        `House bets: ${game.houseBets.length} active\n` +
+        `P2P rounds locked: ${lockedRounds.count}\n\n` +
+        `Next: /admin simend ${game.id.slice(0, 8)} <homeScore> <awayScore>`
+    );
+
+    logger.info({ gameId: game.id }, 'Game simulated to LIVE by admin');
+  } catch (error) {
+    logger.error({ error }, 'Failed to simulate game start');
+    await ctx.reply('Failed to simulate game start.');
+  }
+}
+
+// Simulate game ending with final score
+export async function adminSimEndCommand(ctx: BotContext) {
+  const telegramUser = ctx.from;
+  if (!telegramUser || !isAdmin(telegramUser.id)) {
+    await ctx.reply('Unauthorized.');
+    return;
+  }
+
+  const text = ctx.message?.text || '';
+  const parts = text.split(/\s+/);
+  if (parts.length < 5) {
+    await ctx.reply('Usage: /admin simend <gameId> <homeScore> <awayScore>');
+    return;
+  }
+
+  const gameIdPartial = parts[2];
+  const homeScore = parseInt(parts[3] ?? '0', 10);
+  const awayScore = parseInt(parts[4] ?? '0', 10);
+
+  if (isNaN(homeScore) || isNaN(awayScore)) {
+    await ctx.reply('Scores must be numbers');
+    return;
+  }
+
+  try {
+    const game = await prisma.game.findFirst({
+      where: {
+        id: { startsWith: gameIdPartial },
+      },
+      include: {
+        houseBets: { where: { status: 'ACTIVE' } },
+        rounds: { where: { status: 'LOCKED' } },
+      },
+    });
+
+    if (!game) {
+      await ctx.reply(`No game found starting with "${gameIdPartial}"`);
+      return;
+    }
+
+    // Determine winner
+    const winner = homeScore > awayScore ? 'home' : homeScore < awayScore ? 'away' : null;
+
+    // Update game to FINAL
+    await prisma.game.update({
+      where: { id: game.id },
+      data: {
+        status: 'FINAL',
+        homeScore,
+        awayScore,
+        winner,
+      },
+    });
+
+    const winnerTeam = winner === 'home' ? game.homeTeam : winner === 'away' ? game.awayTeam : 'TIE';
+
+    await ctx.reply(
+      `🏁 Game Ended (Simulated)\n\n` +
+        `${game.awayTeam} ${awayScore} @ ${game.homeTeam} ${homeScore}\n` +
+        `Winner: ${winnerTeam}\n\n` +
+        `House bets to settle: ${game.houseBets.length}\n` +
+        `P2P rounds to settle: ${game.rounds.length}\n\n` +
+        `Settlement will run automatically within 5 minutes.\n` +
+        `Or run settlement manually in the scheduler.`
+    );
+
+    logger.info(
+      { gameId: game.id, homeScore, awayScore, winner },
+      'Game simulated to FINAL by admin'
+    );
+  } catch (error) {
+    logger.error({ error }, 'Failed to simulate game end');
+    await ctx.reply('Failed to simulate game end.');
   }
 }
 

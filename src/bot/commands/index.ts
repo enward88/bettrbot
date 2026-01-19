@@ -14,5 +14,8 @@ export {
   adminRefundCommand,
   adminExposureCommand,
   adminStatsCommand,
+  adminTestGameCommand,
+  adminSimStartCommand,
+  adminSimEndCommand,
   handleAdminCallback,
 } from './admin.js';

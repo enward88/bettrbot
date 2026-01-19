@@ -122,6 +122,10 @@ const TEAM_ALIASES: Record<string, string> = {
   canes: 'Hurricanes',
   hurricanes: 'Hurricanes',
   blues: 'Blues',
+  // Test games
+  'test home': 'Test Home',
+  'test away': 'Test Away',
+  test: 'Test',
   // MMA / UFC fighters (common)
   // Add specific fighters as needed
 };
