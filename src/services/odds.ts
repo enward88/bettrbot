@@ -83,7 +83,8 @@ export async function fetchOddsForSport(sportKey: string): Promise<OddsApiGame[]
     logger.info({ sport: sportKey, count: data.length }, 'Fetched odds');
     return data;
   } catch (error) {
-    logger.error({ error, sport: sportKey }, 'Failed to fetch odds');
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errMsg, sport: sportKey }, 'Failed to fetch odds');
     return [];
   }
 }

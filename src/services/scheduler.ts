@@ -220,8 +220,8 @@ export function startScheduler(): void {
     await lockExpiredRounds();
   });
 
-  // Check game results every minute (only fetches if there are active bets)
-  cron.schedule('* * * * *', async () => {
+  // Check game results every 5 minutes (only fetches if there are active bets)
+  cron.schedule('*/5 * * * *', async () => {
     await checkGameResults();
   });
 
