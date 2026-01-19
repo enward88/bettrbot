@@ -8,6 +8,13 @@ import {
   walletCommand,
   potCommand,
   challengeCommand,
+  adminCommand,
+  adminBetsCommand,
+  adminPendingCommand,
+  adminSettleCommand,
+  adminExposureCommand,
+  adminStatsCommand,
+  handleAdminCallback,
 } from './bot/commands/index.js';
 import {
   handleGameSelection,
@@ -33,6 +40,33 @@ bot.command('wallet', walletCommand);
 bot.command('pot', potCommand);
 bot.command('challenge', challengeCommand);
 
+// Admin commands (restricted to ADMIN_TELEGRAM_ID)
+bot.command('admin', async (ctx) => {
+  const text = ctx.message?.text || '';
+  const parts = text.split(/\s+/);
+  const subcommand = parts[1]?.toLowerCase();
+
+  switch (subcommand) {
+    case 'bets':
+      await adminBetsCommand(ctx);
+      break;
+    case 'pending':
+      await adminPendingCommand(ctx);
+      break;
+    case 'settle':
+      await adminSettleCommand(ctx);
+      break;
+    case 'exposure':
+      await adminExposureCommand(ctx);
+      break;
+    case 'stats':
+      await adminStatsCommand(ctx);
+      break;
+    default:
+      await adminCommand(ctx);
+  }
+});
+
 // Register callback handlers
 bot.callbackQuery(/^bet:game:/, handleGameSelection);
 bot.callbackQuery(/^bet:team:/, handleTeamSelection);
@@ -42,6 +76,7 @@ bot.callbackQuery(/^challenge:team:/, handleChallengeTeamSelection);
 bot.callbackQuery(/^challenge:accept:/, handleChallengeAccept);
 bot.callbackQuery(/^challenge:decline:/, handleChallengeDecline);
 bot.callbackQuery(/^house:/, handleHouseBetSelection);
+bot.callbackQuery(/^admin:/, handleAdminCallback);
 
 // Register text handlers
 bot.on('message:text', async (ctx, next) => {

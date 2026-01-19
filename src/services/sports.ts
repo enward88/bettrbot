@@ -413,10 +413,14 @@ export async function refreshTodaysGames(): Promise<void> {
 
 // Check for game results and update database
 export async function checkGameResults(): Promise<void> {
+  // Check for games with either P2P rounds OR house bets that need settlement
   const gamesWithBets = await prisma.game.findMany({
     where: {
       status: { in: ['SCHEDULED', 'LIVE'] },
-      rounds: { some: { status: { in: ['OPEN', 'LOCKED'] } } },
+      OR: [
+        { rounds: { some: { status: { in: ['OPEN', 'LOCKED'] } } } },
+        { houseBets: { some: { status: { in: ['PENDING', 'ACTIVE'] } } } },
+      ],
     },
   });
 

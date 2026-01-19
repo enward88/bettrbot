@@ -6,3 +6,12 @@ export { mybetsCommand } from './mybets.js';
 export { walletCommand } from './wallet.js';
 export { potCommand } from './pot.js';
 export { challengeCommand } from './challenge.js';
+export {
+  adminCommand,
+  adminBetsCommand,
+  adminPendingCommand,
+  adminSettleCommand,
+  adminExposureCommand,
+  adminStatsCommand,
+  handleAdminCallback,
+} from './admin.js';

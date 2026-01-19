@@ -11,39 +11,119 @@ import type { BetType } from '@prisma/client';
 
 const logger = createChildLogger('conversational');
 
-// Common team name aliases
+// Common team name aliases (case-insensitive matching)
 const TEAM_ALIASES: Record<string, string> = {
   // MLB
-  dodgers: 'Los Angeles Dodgers',
-  yankees: 'New York Yankees',
-  redsox: 'Boston Red Sox',
-  cubs: 'Chicago Cubs',
-  mets: 'New York Mets',
-  giants: 'San Francisco Giants',
-  astros: 'Houston Astros',
-  braves: 'Atlanta Braves',
+  dodgers: 'Dodgers',
+  yankees: 'Yankees',
+  redsox: 'Red Sox',
+  'red sox': 'Red Sox',
+  cubs: 'Cubs',
+  mets: 'Mets',
+  giants: 'Giants',
+  astros: 'Astros',
+  braves: 'Braves',
+  padres: 'Padres',
+  phillies: 'Phillies',
+  mariners: 'Mariners',
+  rangers: 'Rangers',
+  guardians: 'Guardians',
+  orioles: 'Orioles',
+  twins: 'Twins',
+  rays: 'Rays',
   // NFL
-  chiefs: 'Kansas City Chiefs',
-  eagles: 'Philadelphia Eagles',
-  cowboys: 'Dallas Cowboys',
+  chiefs: 'Chiefs',
+  eagles: 'Eagles',
+  cowboys: 'Cowboys',
   niners: '49ers',
-  bills: 'Buffalo Bills',
-  ravens: 'Baltimore Ravens',
-  packers: 'Green Bay Packers',
+  '49ers': '49ers',
+  bills: 'Bills',
+  ravens: 'Ravens',
+  packers: 'Packers',
+  lions: 'Lions',
+  bengals: 'Bengals',
+  dolphins: 'Dolphins',
+  jets: 'Jets',
+  broncos: 'Broncos',
+  chargers: 'Chargers',
+  raiders: 'Raiders',
+  seahawks: 'Seahawks',
+  commanders: 'Commanders',
+  steelers: 'Steelers',
+  browns: 'Browns',
+  saints: 'Saints',
+  falcons: 'Falcons',
+  bucs: 'Buccaneers',
+  buccaneers: 'Buccaneers',
+  panthers: 'Panthers',
+  vikings: 'Vikings',
+  bears: 'Bears',
+  texans: 'Texans',
+  colts: 'Colts',
+  jaguars: 'Jaguars',
+  titans: 'Titans',
+  cardinals: 'Cardinals',
+  rams: 'Rams',
   // NBA
-  lakers: 'Los Angeles Lakers',
-  celtics: 'Boston Celtics',
-  warriors: 'Golden State Warriors',
-  nets: 'Brooklyn Nets',
-  heat: 'Miami Heat',
-  bucks: 'Milwaukee Bucks',
-  suns: 'Phoenix Suns',
+  lakers: 'Lakers',
+  celtics: 'Celtics',
+  warriors: 'Warriors',
+  dubs: 'Warriors',
+  nets: 'Nets',
+  heat: 'Heat',
+  bucks: 'Bucks',
+  suns: 'Suns',
+  nuggets: 'Nuggets',
+  sixers: '76ers',
+  '76ers': '76ers',
+  knicks: 'Knicks',
+  mavs: 'Mavericks',
+  mavericks: 'Mavericks',
+  clippers: 'Clippers',
+  pelicans: 'Pelicans',
+  rockets: 'Rockets',
+  spurs: 'Spurs',
+  jazz: 'Jazz',
+  timberwolves: 'Timberwolves',
+  wolves: 'Timberwolves',
+  thunder: 'Thunder',
+  blazers: 'Trail Blazers',
+  trailblazers: 'Trail Blazers',
+  kings: 'Kings',
+  grizzlies: 'Grizzlies',
+  grizz: 'Grizzlies',
+  magic: 'Magic',
+  hawks: 'Hawks',
+  hornets: 'Hornets',
+  pacers: 'Pacers',
+  pistons: 'Pistons',
+  raptors: 'Raptors',
+  wizards: 'Wizards',
+  cavs: 'Cavaliers',
+  cavaliers: 'Cavaliers',
   // NHL
-  bruins: 'Boston Bruins',
-  leafs: 'Toronto Maple Leafs',
-  oilers: 'Edmonton Oilers',
-  knights: 'Vegas Golden Knights',
-  avs: 'Colorado Avalanche',
+  bruins: 'Bruins',
+  leafs: 'Maple Leafs',
+  'maple leafs': 'Maple Leafs',
+  oilers: 'Oilers',
+  knights: 'Golden Knights',
+  'golden knights': 'Golden Knights',
+  avs: 'Avalanche',
+  avalanche: 'Avalanche',
+  lightning: 'Lightning',
+  bolts: 'Lightning',
+  penguins: 'Penguins',
+  pens: 'Penguins',
+  caps: 'Capitals',
+  capitals: 'Capitals',
+  flames: 'Flames',
+  canucks: 'Canucks',
+  kraken: 'Kraken',
+  canes: 'Hurricanes',
+  hurricanes: 'Hurricanes',
+  blues: 'Blues',
+  // MMA / UFC fighters (common)
+  // Add specific fighters as needed
 };
 
 // Bet type patterns
@@ -56,9 +136,11 @@ const BET_TYPE_PATTERNS = {
 
 // Parse conversational bet message
 // Examples:
-// "@bot 1 sol dodgers ML"
-// "@bot 0.5 sol chiefs -3.5"
+// "bet 1 sol dodgers ML"
+// "bet 0.5 sol chiefs -3.5"
 // "@bot 2 sol over 45.5 patriots game"
+// "1 sol lakers ML"
+// "lakers 2 sol"
 interface ParsedBet {
   amount: number;
   teamSearch: string;
@@ -67,7 +149,7 @@ interface ParsedBet {
 }
 
 function parseBetMessage(text: string): ParsedBet | null {
-  // Remove @mention if present
+  // Remove @mention if present and normalize
   const cleanText = text.replace(/@\w+/g, '').trim().toLowerCase();
 
   // Extract amount (look for number followed by "sol")
@@ -101,22 +183,35 @@ function parseBetMessage(text: string): ParsedBet | null {
   }
   // Otherwise default to MONEYLINE
 
-  // Extract team name - remove known patterns and amount
+  // Extract team name - remove known patterns, amount, and bet prefix
   let teamSearch = cleanText
+    .replace(/^bet\s+/i, '') // Remove leading "bet"
     .replace(/(\d+\.?\d*)\s*sol/i, '')
     .replace(BET_TYPE_PATTERNS.MONEYLINE, '')
     .replace(BET_TYPE_PATTERNS.SPREAD, '')
     .replace(BET_TYPE_PATTERNS.TOTAL_OVER, '')
     .replace(BET_TYPE_PATTERNS.TOTAL_UNDER, '')
     .replace(/\bgame\b/i, '')
+    .replace(/\bon\b/i, '') // Remove "on" (e.g., "bet on lakers")
     .trim();
 
-  // Check for aliases
-  const words = teamSearch.split(/\s+/);
-  for (const word of words) {
-    if (TEAM_ALIASES[word]) {
-      teamSearch = TEAM_ALIASES[word];
+  // Check for aliases - try multi-word aliases first, then single words
+  const lowerSearch = teamSearch.toLowerCase();
+  for (const [alias, team] of Object.entries(TEAM_ALIASES)) {
+    if (lowerSearch.includes(alias)) {
+      teamSearch = team;
       break;
+    }
+  }
+
+  // If still no match, try individual words
+  if (teamSearch === lowerSearch) {
+    const words = teamSearch.split(/\s+/);
+    for (const word of words) {
+      if (TEAM_ALIASES[word]) {
+        teamSearch = TEAM_ALIASES[word];
+        break;
+      }
     }
   }
 
@@ -133,6 +228,23 @@ function parseBetMessage(text: string): ParsedBet | null {
   };
 }
 
+// Check if text looks like a bet command
+function looksLikeBet(text: string): boolean {
+  const lower = text.toLowerCase();
+  // Must contain "sol" (our currency)
+  if (!/\bsol\b/i.test(lower)) return false;
+  // Must contain a number (bet amount)
+  if (!/\d+\.?\d*/.test(lower)) return false;
+  // Should start with "bet" or contain team-related words, or @mention
+  if (lower.startsWith('bet ')) return true;
+  if (/@\w+/.test(lower)) return true;
+  // Check if it contains any team alias
+  for (const alias of Object.keys(TEAM_ALIASES)) {
+    if (lower.includes(alias)) return true;
+  }
+  return false;
+}
+
 // Handle conversational bet mentions
 export async function handleConversationalBet(ctx: BotContext): Promise<void> {
   const message = ctx.message;
@@ -140,15 +252,11 @@ export async function handleConversationalBet(ctx: BotContext): Promise<void> {
 
   const text = message.text;
 
-  // Check if this is a mention of our bot
-  const botUsername = ctx.me?.username;
-  if (!botUsername) return;
+  // Skip commands
+  if (text.startsWith('/')) return;
 
-  // Check for @mention of bot
-  const mentionRegex = new RegExp(`@${botUsername}`, 'i');
-  if (!mentionRegex.test(text)) {
-    return;
-  }
+  // Check if this looks like a bet
+  if (!looksLikeBet(text)) return;
 
   logger.debug({ text, from: message.from?.username }, 'Processing conversational bet');
 
@@ -157,9 +265,10 @@ export async function handleConversationalBet(ctx: BotContext): Promise<void> {
   if (!parsed) {
     await ctx.reply(
       'I couldn\'t understand that bet. Try:\n' +
-        `@${botUsername} 1 sol [team] ML\n` +
-        `@${botUsername} 0.5 sol [team] -3.5\n` +
-        `@${botUsername} 2 sol over 45.5 [team] game`,
+        '• bet 1 sol lakers ML\n' +
+        '• bet 0.5 sol chiefs -3.5\n' +
+        '• bet 2 sol over 220.5 lakers\n' +
+        '• 1.5 sol dodgers ML',
       { reply_to_message_id: message.message_id }
     );
     return;
@@ -356,17 +465,7 @@ export async function handleConversationalBet(ctx: BotContext): Promise<void> {
   );
 }
 
-// Check if a message is a potential bet mention
-export function isBetMention(text: string, botUsername: string): boolean {
-  const mentionRegex = new RegExp(`@${botUsername}`, 'i');
-  if (!mentionRegex.test(text)) {
-    return false;
-  }
-
-  // Check if it contains "sol" (currency)
-  if (!/\bsol\b/i.test(text)) {
-    return false;
-  }
-
-  return true;
+// Check if a message is a potential bet (exported for use elsewhere if needed)
+export function isBetMention(text: string): boolean {
+  return looksLikeBet(text);
 }

@@ -67,12 +67,30 @@ export async function gamesCommand(ctx: BotContext) {
       message += `${emoji} ${sport}\n`;
 
       for (const game of sportGames) {
+        // Format time for display - use user-friendly local time
+        // Show date if game is not today
+        const now = new Date();
+        const gameDate = game.startTime;
+        const isToday = gameDate.toDateString() === now.toDateString();
+
         const time = game.startTime.toLocaleTimeString('en-US', {
           hour: 'numeric',
           minute: '2-digit',
           hour12: true,
-          timeZone: 'America/New_York',
         });
+
+        let dateTimeStr: string;
+        if (isToday) {
+          dateTimeStr = `Today ${time}`;
+        } else {
+          const dayStr = game.startTime.toLocaleDateString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+          });
+          dateTimeStr = `${dayStr} ${time}`;
+        }
+
         const statusLabel = game.status === 'LIVE' ? ' 🔴 LIVE' : '';
 
         // Build odds display
@@ -81,7 +99,7 @@ export async function gamesCommand(ctx: BotContext) {
           oddsStr = ` [${formatOdds(game.awayMoneyline)}/${formatOdds(game.homeMoneyline)}]`;
         }
 
-        message += `  ${game.awayTeam} @ ${game.homeTeam} - ${time} ET${statusLabel}${oddsStr}\n`;
+        message += `  ${game.awayTeam} @ ${game.homeTeam} - ${dateTimeStr}${statusLabel}${oddsStr}\n`;
       }
       message += '\n';
     }

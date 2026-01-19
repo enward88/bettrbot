@@ -1,71 +1,154 @@
 # Bettr
 
-Peer-to-peer sports betting on Telegram, powered by Solana.
+Peer-to-peer and house sports betting on Telegram, powered by Solana.
 
 ## What is Bettr?
 
-Bettr is a Telegram bot that lets friends bet against each other on sports games using SOL cryptocurrency. Add the bot to your group chat, pick a game, choose your team, and send your wager to a unique wallet. When the game ends, winners get paid automatically.
+Bettr is a Telegram bot that lets you bet on sports using SOL cryptocurrency. You can:
+- **House Bets**: Bet against the house with real-time odds (moneyline, spread, over/under)
+- **P2P Bets**: Bet against friends in your group chat (winners split the pot)
+
+When games end, winnings are paid out automatically to your Solana wallet.
 
 ## Supported Sports
 
-- 🏀 NBA
+- 🏀 NBA, WNBA
 - 🏈 NFL
-- 🏈 College Football (NCAAF)
-- 🏒 NHL
+- ⚾ MLB
 - 🥊 MMA/UFC
+
+## Quick Start
+
+### For Users
+
+1. **Register**: Send `/start` to [@bettrsportsbot](https://t.me/bettrsportsbot) on Telegram
+2. **Set your wallet**: `/wallet YOUR_SOLANA_ADDRESS`
+3. **Add to group**: Add the bot to your group chat
+4. **View games**: `/games`
+5. **Place bets**: Just type naturally!
+
+### Betting Examples
+
+```
+bet 1 sol lakers ML
+bet 0.5 sol chiefs -3.5
+bet 2 sol over 220.5 celtics
+1.5 sol dodgers ML
+```
 
 ## How It Works
 
-1. **Add Bettr to your group chat**
-2. **Browse today's games** with `/games`
-3. **Start a bet** - Pick a game and choose your team
-4. **Send SOL** to the generated wallet address
-5. **Others join** - Friends pick the opposing team and send their wagers
-6. **Game ends** - Bettr detects the result and pays out winners automatically
+### House Bets (with odds)
+When a game has odds available, you bet against the house:
+1. Pick your bet (moneyline, spread, or total)
+2. Send SOL to your unique deposit address
+3. If you win, you get paid based on the odds
 
-## Example
-
-```
-Lakers vs Celtics tonight
-
-Alice bets 1 SOL on Lakers
-Bob bets 2 SOL on Lakers
-Charlie bets 1.5 SOL on Celtics
-
-Total pot: 4.5 SOL
-
-Lakers win!
-
-Payout (after 1% fee):
-- Alice receives: 1.485 SOL
-- Bob receives: 2.97 SOL
-- Charlie receives: nothing
-```
+### P2P Bets (winner-take-all)
+When odds aren't available, you bet against friends:
+1. Pick a team
+2. Friends pick the opposing team
+3. Winners split the pot (1% fee)
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `/start` | Register your account |
-| `/games` | View today's games |
-| `/bet` | Start or join a bet |
+| `/games` | View today's games with odds |
+| `/bet` | Start a bet (interactive) |
 | `/mybets` | View your active bets |
-| `/wallet <address>` | Set your payout wallet |
+| `/wallet <address>` | Set your Solana payout wallet |
 | `/help` | Show help |
+
+## Group Setup Guide
+
+When you add Bettr to a group:
+
+1. **Everyone registers**: Each person taps `/start`
+2. **Set wallets**: DM the bot with `/wallet YOUR_ADDRESS`
+3. **View games**: `/games` shows today's matchups
+4. **Place bets**: Type naturally like "bet 1 sol lakers ML"
 
 ## Fees
 
-Bettr takes a **1% fee** on every settled bet. This is deducted from the pot before payouts.
+- **House Bets**: No additional fee (house edge built into odds)
+- **P2P Bets**: 1% fee deducted from the pot before payout
+
+## Self-Hosting
+
+### Prerequisites
+
+- Node.js 18+
+- PostgreSQL database
+- Solana wallet (for treasury)
+
+### Environment Variables
+
+Create a `.env` file:
+
+```env
+# Required
+TELEGRAM_BOT_TOKEN=your_bot_token
+DATABASE_URL=postgresql://user:pass@localhost:5432/bettr
+TREASURY_WALLET_ADDRESS=your_treasury_solana_address
+ENCRYPTION_KEY=64_character_hex_string
+
+# APIs
+BALLDONTLIE_API_KEY=your_api_key
+ODDS_API_KEY=your_odds_api_key
+
+# Optional
+ADMIN_TELEGRAM_ID=your_telegram_user_id
+SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+SOLANA_NETWORK=mainnet-beta
+LOG_LEVEL=info
+```
+
+### Installation
+
+```bash
+# Install dependencies
+npm install
+
+# Set up database
+npx prisma migrate deploy
+
+# Build
+npm run build
+
+# Start
+npm start
+```
+
+### Running with PM2
+
+```bash
+pm2 start dist/index.js --name bettrbot
+pm2 save
+```
 
 ## Security
 
-- Round wallet private keys are encrypted at rest using AES-256-GCM
-- Each betting round uses a unique wallet
-- Funds are only held temporarily until game settlement
-- No user private keys are ever stored
+- Wallet private keys encrypted at rest using AES-256-GCM
+- Each bet uses a unique deposit wallet
+- Funds held temporarily until game settlement
+- No user private keys stored
+
+## Admin Commands
+
+If you're the admin (set via `ADMIN_TELEGRAM_ID`):
+
+| Command | Description |
+|---------|-------------|
+| `/admin` | Show admin menu |
+| `/admin bets` | View all active bets |
+| `/admin pending` | View unsettled games |
+| `/admin settle <id> <WIN\|LOSS\|PUSH>` | Manual settlement |
+| `/admin exposure` | View house exposure |
+| `/admin stats` | Betting statistics |
 
 ## License
 
-This software is proprietary and confidential. All rights reserved. See [LICENSE](LICENSE) for details.
-
-Unauthorized copying, forking, modification, or distribution is strictly prohibited.
+This software is proprietary and confidential. All rights reserved.
+Unauthorized copying, forking, modification, or distribution is prohibited.
