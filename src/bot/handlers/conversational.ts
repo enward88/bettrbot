@@ -157,7 +157,8 @@ function parseBetMessage(text: string): ParsedBet | null {
   const cleanText = text.replace(/@\w+/g, '').trim().toLowerCase();
 
   // Extract amount (look for number followed by "sol")
-  const amountMatch = cleanText.match(/(\d+\.?\d*)\s*sol/i);
+  // Supports: 1 sol, 0.5 sol, .01 sol, 1.5sol
+  const amountMatch = cleanText.match(/(\d*\.?\d+)\s*sol/i);
   if (!amountMatch) {
     return null;
   }
