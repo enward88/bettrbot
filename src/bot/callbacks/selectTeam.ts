@@ -1,7 +1,7 @@
 import { type BotContext } from '../bot.js';
 import { prisma } from '../../db/prisma.js';
 import { createRoundWallet } from '../../services/wallet.js';
-import { MIN_BET_SOL } from '../../utils/constants.js';
+import { MIN_BET_SOL, MAX_P2P_BET_SOL } from '../../utils/constants.js';
 import { createChildLogger } from '../../utils/logger.js';
 
 const logger = createChildLogger('cb:selectTeam');
@@ -119,7 +119,7 @@ export async function handleTeamSelection(ctx: BotContext) {
     await ctx.editMessageText(
       `Bet placed on ${teamName}!\n\n` +
         `Send SOL to this wallet:\n\`${round.walletAddress}\`\n\n` +
-        `Minimum bet: ${MIN_BET_SOL} SOL\n\n` +
+        `Bet limits: ${MIN_BET_SOL} - ${MAX_P2P_BET_SOL} SOL\n\n` +
         `Your wager will be confirmed once the deposit is detected.\n` +
         `Bets lock when the game starts.`,
       { parse_mode: 'Markdown' }

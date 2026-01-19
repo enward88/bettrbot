@@ -4,8 +4,10 @@ export const FEE_PERCENTAGE = 0.01;
 // Minimum bet amount in SOL
 export const MIN_BET_SOL = 0.01;
 
-// Maximum bet amount in SOL (prevents catastrophic exposure)
-export const MAX_BET_SOL = 10;
+// Maximum bet amounts in SOL (prevents catastrophic exposure)
+export const MAX_HOUSE_BET_SOL = 2;  // PvE (house) bets
+export const MAX_P2P_BET_SOL = 5;    // PvP (peer-to-peer) bets
+export const MAX_BET_SOL = 5;        // General fallback
 
 // Minimum bet amount in lamports (1 SOL = 1,000,000,000 lamports)
 export const LAMPORTS_PER_SOL = 1_000_000_000;

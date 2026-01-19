@@ -3,7 +3,7 @@ import { prisma } from '../../db/prisma.js';
 import { createHouseBet } from '../../services/houseBet.js';
 import { formatOdds } from '../../services/odds.js';
 import { createChildLogger } from '../../utils/logger.js';
-import { LAMPORTS_PER_SOL, MIN_BET_SOL } from '../../utils/constants.js';
+import { LAMPORTS_PER_SOL, MIN_BET_SOL, MAX_HOUSE_BET_SOL } from '../../utils/constants.js';
 
 const logger = createChildLogger('cb:houseBet');
 
@@ -125,8 +125,8 @@ export async function handleHouseBetAmount(ctx: BotContext) {
 
   // Parse amount
   const amount = parseFloat(text.replace(/[^0-9.]/g, ''));
-  if (isNaN(amount) || amount < MIN_BET_SOL) {
-    await ctx.reply(`Invalid amount. Minimum bet is ${MIN_BET_SOL} SOL.`);
+  if (isNaN(amount) || amount < MIN_BET_SOL || amount > MAX_HOUSE_BET_SOL) {
+    await ctx.reply(`House bets must be between ${MIN_BET_SOL} and ${MAX_HOUSE_BET_SOL} SOL.`);
     return;
   }
 

@@ -6,7 +6,7 @@ import { settleCompletedGames } from './settlement.js';
 import { settleHouseBets, cancelExpiredHouseBets, pollHouseBetWallets, sweepSettledHouseBets } from './houseBet.js';
 import { createChildLogger } from '../utils/logger.js';
 import { bot } from '../bot/bot.js';
-import { MIN_BET_LAMPORTS, LAMPORTS_PER_SOL } from '../utils/constants.js';
+import { MIN_BET_LAMPORTS, MAX_P2P_BET_SOL, LAMPORTS_PER_SOL } from '../utils/constants.js';
 
 const logger = createChildLogger('scheduler');
 
@@ -65,9 +65,19 @@ async function pollWalletDeposits(): Promise<void> {
           }
         }
 
+        const maxP2pLamports = BigInt(MAX_P2P_BET_SOL * LAMPORTS_PER_SOL);
         if (depositAmount < MIN_BET_LAMPORTS) {
           processedTxSignatures.add(tx.signature);
           continue;
+        }
+
+        // Cap deposit at max P2P bet (excess stays in wallet for refund)
+        const cappedAmount = depositAmount > maxP2pLamports ? maxP2pLamports : depositAmount;
+        if (depositAmount > maxP2pLamports) {
+          logger.warn(
+            { roundId: round.id, deposit: depositAmount.toString(), max: maxP2pLamports.toString() },
+            'Deposit exceeds max P2P bet - capping amount'
+          );
         }
 
         // Find a pending wager (amount = 0) without a tx signature to assign this to
@@ -76,11 +86,11 @@ async function pollWalletDeposits(): Promise<void> {
         );
 
         if (pendingWager) {
-          // Update the wager with the deposit
+          // Update the wager with the deposit (capped at max)
           await prisma.wager.update({
             where: { id: pendingWager.id },
             data: {
-              amount: depositAmount,
+              amount: cappedAmount,
               txSignature: tx.signature,
             },
           });
@@ -89,11 +99,11 @@ async function pollWalletDeposits(): Promise<void> {
           const updatedRound = await prisma.round.update({
             where: { id: round.id },
             data: {
-              totalPot: { increment: depositAmount },
+              totalPot: { increment: cappedAmount },
             },
           });
 
-          const solAmount = Number(depositAmount) / LAMPORTS_PER_SOL;
+          const solAmount = Number(cappedAmount) / LAMPORTS_PER_SOL;
           const teamName = pendingWager.teamPick === 'home'
             ? round.game.homeTeam
             : round.game.awayTeam;

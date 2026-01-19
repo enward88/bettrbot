@@ -1,7 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { type BotContext } from '../bot.js';
 import { prisma } from '../../db/prisma.js';
-import { LAMPORTS_PER_SOL, MIN_BET_SOL } from '../../utils/constants.js';
+import { LAMPORTS_PER_SOL, MIN_BET_SOL, MAX_P2P_BET_SOL } from '../../utils/constants.js';
 import { createChildLogger } from '../../utils/logger.js';
 
 const logger = createChildLogger('cmd:challenge');
@@ -55,8 +55,8 @@ export async function challengeCommand(ctx: BotContext) {
     const amountStr = parts[1];
     const amount = parseFloat(amountStr ?? '0');
 
-    if (isNaN(amount) || amount < MIN_BET_SOL) {
-      await ctx.reply(`Invalid amount. Minimum bet is ${MIN_BET_SOL} SOL.`);
+    if (isNaN(amount) || amount < MIN_BET_SOL || amount > MAX_P2P_BET_SOL) {
+      await ctx.reply(`Invalid amount. P2P bets must be between ${MIN_BET_SOL} and ${MAX_P2P_BET_SOL} SOL.`);
       return;
     }
 
