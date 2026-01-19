@@ -203,8 +203,8 @@ async function lockExpiredRounds(): Promise<void> {
 export function startScheduler(): void {
   logger.info('Starting scheduler');
 
-  // Refresh games every hour
-  cron.schedule('0 * * * *', async () => {
+  // Refresh games every 15 minutes to catch score updates faster
+  cron.schedule('*/15 * * * *', async () => {
     logger.info('Running scheduled game refresh');
     await refreshTodaysGames();
   });
@@ -220,8 +220,8 @@ export function startScheduler(): void {
     await lockExpiredRounds();
   });
 
-  // Check game results every 2 minutes
-  cron.schedule('*/2 * * * *', async () => {
+  // Check game results every minute (only fetches if there are active bets)
+  cron.schedule('* * * * *', async () => {
     await checkGameResults();
   });
 
