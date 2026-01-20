@@ -112,7 +112,8 @@ model Round {
   wagers          Wager[]
   challenges      Challenge[]
 
-  @@unique([gameId, chatId, status]) // Prevent duplicate open rounds for same game/chat
+  // Note: Can't use partial unique index in Prisma, so we handle uniqueness
+  // in application code with distributed locking for OPEN rounds
   @@index([gameId])
   @@index([chatId])
   @@index([status])
