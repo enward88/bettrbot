@@ -1,6 +1,7 @@
 import { type BotContext } from '../bot.js';
 import { prisma } from '../../db/prisma.js';
 import { createRoundWallet } from '../../services/wallet.js';
+import { subscribeToWallet } from '../../services/walletSubscription.js';
 import { MIN_BET_SOL, MAX_P2P_BET_SOL } from '../../utils/constants.js';
 import { createChildLogger } from '../../utils/logger.js';
 import { withLock } from '../../utils/locks.js';
@@ -87,6 +88,11 @@ export async function handleTeamSelection(ctx: BotContext) {
               },
             });
             logger.info({ roundId: round.id, gameId, chatId }, 'Created new betting round');
+            // Subscribe to wallet for real-time deposit detection
+            const roundIdForSubscription = round.id;
+            subscribeToWallet(address, roundIdForSubscription).catch((err) => {
+              logger.warn({ error: err, roundId: roundIdForSubscription }, 'Failed to subscribe to wallet');
+            });
           } catch (createError) {
             // If unique constraint violation, another user just created it - fetch it
             if ((createError as { code?: string }).code === 'P2002') {

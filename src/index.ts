@@ -31,7 +31,7 @@ import {
   handleHouseBetAmount,
 } from './bot/callbacks/index.js';
 import { handleConversationalBet } from './bot/handlers/index.js';
-import { startScheduler } from './services/scheduler.js';
+import { startScheduler, stopScheduler } from './services/scheduler.js';
 import { logger } from './utils/logger.js';
 
 // Register commands
@@ -110,8 +110,8 @@ bot.on('message:text', async (ctx, next) => {
 async function main() {
   logger.info('Starting Bettr bot...');
 
-  // Start the scheduler for background tasks
-  startScheduler();
+  // Start the scheduler for background tasks (including WebSocket subscriptions)
+  await startScheduler();
 
   // Start bot polling
   await bot.start({
@@ -127,14 +127,16 @@ main().catch((error) => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   logger.info('Received SIGINT, shutting down...');
+  await stopScheduler();
   bot.stop();
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM, shutting down...');
+  await stopScheduler();
   bot.stop();
   process.exit(0);
 });

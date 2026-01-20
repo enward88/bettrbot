@@ -141,3 +141,15 @@ export async function getProcessedTransactionsForRound(roundId: string): Promise
   });
   return txs.map((tx) => tx.signature);
 }
+
+/**
+ * Acquire a wallet-level lock to prevent concurrent operations on the same wallet.
+ * This prevents race conditions like refunding and settling the same wallet simultaneously.
+ */
+export async function withWalletLock<T>(
+  walletAddress: string,
+  fn: () => Promise<T>,
+  timeoutMs: number = 120000
+): Promise<T | null> {
+  return withLock(`wallet:${walletAddress}`, fn, timeoutMs);
+}

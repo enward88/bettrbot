@@ -293,16 +293,44 @@ async function refundRound(
     wagers: Array<{
       id: string;
       amount: bigint;
+      paidOut?: boolean;
       user: {
         solanaAddress: string | null;
       };
     }>;
   }
 ): Promise<void> {
+  // Use same lock as settlement to prevent refund/payout race condition
+  const result = await withLock(`round:settle:${round.id}`, async () => {
+    // Re-check round status inside lock
+    const currentRound = await prisma.round.findUnique({
+      where: { id: round.id },
+      select: { status: true },
+    });
+
+    // Don't refund if already settled or cancelled
+    if (!currentRound || currentRound.status === 'SETTLED' || currentRound.status === 'CANCELLED') {
+      logger.info({ roundId: round.id, status: currentRound?.status }, 'Round already settled/cancelled, skipping refund');
+      return { skipped: true };
+    }
+
+    return { skipped: false };
+  }, 120000);
+
+  if (result === null) {
+    logger.debug({ roundId: round.id }, 'Skipping refund - another operation in progress');
+    return;
+  }
+
+  if (result.skipped) {
+    return;
+  }
+
   logger.info({ roundId: round.id }, 'Refunding round');
 
   for (const wager of round.wagers) {
-    if (!wager.user.solanaAddress || wager.amount <= BigInt(5000)) {
+    // Skip if already paid out or no address
+    if (wager.paidOut || !wager.user.solanaAddress || wager.amount <= BigInt(5000)) {
       continue;
     }
 

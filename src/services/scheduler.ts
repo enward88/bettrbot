@@ -4,6 +4,7 @@ import { refreshTodaysGames, checkGameResults } from './sports.js';
 import { getRecentTransactions, getConnection } from './wallet.js';
 import { settleCompletedGames } from './settlement.js';
 import { settleHouseBets, cancelExpiredHouseBets, pollHouseBetWallets, sweepSettledHouseBets } from './houseBet.js';
+import { subscribeToAllOpenRounds, unsubscribeAll, getSubscriptionCount } from './walletSubscription.js';
 import { createChildLogger } from '../utils/logger.js';
 import { bot } from '../bot/bot.js';
 import { MIN_BET_LAMPORTS, MAX_P2P_BET_SOL, LAMPORTS_PER_SOL } from '../utils/constants.js';
@@ -259,8 +260,16 @@ async function lockExpiredRounds(): Promise<void> {
 }
 
 // Start all scheduled tasks
-export function startScheduler(): void {
+export async function startScheduler(): Promise<void> {
   logger.info('Starting scheduler');
+
+  // Subscribe to open round wallets via WebSocket for real-time deposit detection
+  try {
+    await subscribeToAllOpenRounds();
+    logger.info({ subscriptions: getSubscriptionCount() }, 'WebSocket subscriptions initialized');
+  } catch (error) {
+    logger.error({ error }, 'Failed to initialize WebSocket subscriptions - falling back to polling only');
+  }
 
   // Refresh games every 15 minutes to catch score updates faster
   cron.schedule('*/15 * * * *', async () => {
@@ -268,7 +277,8 @@ export function startScheduler(): void {
     await refreshTodaysGames();
   });
 
-  // Poll wallets every 30 seconds
+  // Poll wallets every 30 seconds as FALLBACK (WebSocket is primary)
+  // This catches deposits that WebSocket might miss due to connection issues
   cron.schedule('*/30 * * * * *', async () => {
     await pollWalletDeposits();
     await pollHouseBetWallets();
@@ -317,6 +327,13 @@ export function startScheduler(): void {
   });
 
   logger.info('Scheduler started');
+}
+
+// Graceful shutdown - clean up WebSocket subscriptions
+export async function stopScheduler(): Promise<void> {
+  logger.info('Stopping scheduler');
+  await unsubscribeAll();
+  logger.info('Scheduler stopped');
 }
 
 // Mark games as cancelled if they started 6+ hours ago but are still SCHEDULED

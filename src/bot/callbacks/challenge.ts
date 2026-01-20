@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { type BotContext } from '../bot.js';
 import { prisma } from '../../db/prisma.js';
 import { createRoundWallet } from '../../services/wallet.js';
+import { subscribeToWallet } from '../../services/walletSubscription.js';
 import { LAMPORTS_PER_SOL, MIN_BET_SOL } from '../../utils/constants.js';
 import { createChildLogger } from '../../utils/logger.js';
 import { withLock } from '../../utils/locks.js';
@@ -241,6 +242,11 @@ export async function handleChallengeAccept(ctx: BotContext) {
             status: 'ACCEPTED',
             roundId: round.id,
           },
+        });
+
+        // Subscribe to wallet for real-time deposit detection
+        subscribeToWallet(address, round.id).catch((err) => {
+          logger.warn({ error: err, roundId: round.id }, 'Failed to subscribe to wallet');
         });
 
         return { success: true, challenge, round, address };
