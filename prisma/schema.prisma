@@ -112,6 +112,7 @@ model Round {
   wagers          Wager[]
   challenges      Challenge[]
 
+  @@unique([gameId, chatId, status]) // Prevent duplicate open rounds for same game/chat
   @@index([gameId])
   @@index([chatId])
   @@index([status])
@@ -125,11 +126,12 @@ model Wager {
   user        User     @relation(fields: [userId], references: [id])
   teamPick    String
   amount      BigInt
-  txSignature String?
+  txSignature String?  @unique // Prevent same tx being linked to multiple wagers
   paidOut     Boolean  @default(false)
   payoutTx    String?
   createdAt   DateTime @default(now())
 
+  @@unique([roundId, userId]) // One wager per user per round
   @@index([roundId])
   @@index([userId])
 }
@@ -209,4 +211,30 @@ enum RoundStatus {
   LOCKED
   SETTLED
   CANCELLED
+}
+
+// Track processed Solana transactions to prevent double-spend on restart
+model ProcessedTransaction {
+  id          String   @id @default(uuid())
+  signature   String   @unique
+  roundId     String?  // The round this transaction was linked to (if any)
+  houseBetId  String?  // The house bet this transaction was linked to (if any)
+  amount      BigInt   // Amount processed
+  processedAt DateTime @default(now())
+
+  @@index([signature])
+  @@index([roundId])
+  @@index([houseBetId])
+}
+
+// Distributed lock for preventing concurrent operations on critical resources
+model ResourceLock {
+  id          String   @id @default(uuid())
+  resourceId  String   @unique  // e.g., "round:abc123", "settlement:xyz", "scheduler:deposit_poll"
+  lockedBy    String   // Instance identifier
+  lockedAt    DateTime @default(now())
+  expiresAt   DateTime // Auto-expire locks after timeout
+
+  @@index([resourceId])
+  @@index([expiresAt])
 }

@@ -4,6 +4,7 @@ import { prisma } from '../../db/prisma.js';
 import { createRoundWallet } from '../../services/wallet.js';
 import { LAMPORTS_PER_SOL, MIN_BET_SOL } from '../../utils/constants.js';
 import { createChildLogger } from '../../utils/logger.js';
+import { withLock } from '../../utils/locks.js';
 
 const logger = createChildLogger('cb:challenge');
 
@@ -162,86 +163,101 @@ export async function handleChallengeAccept(ctx: BotContext) {
   const challengeId = callbackData.replace('challenge:accept:', '');
 
   try {
-    const challenge = await prisma.challenge.findUnique({
-      where: { id: challengeId },
-      include: {
-        game: true,
-        challenger: true,
-        opponent: true,
-      },
-    });
+    // Use distributed lock to prevent race condition on double-click
+    const result = await withLock(`challenge:accept:${challengeId}`, async () => {
+      // Use transaction for atomicity
+      return await prisma.$transaction(async (tx) => {
+        const challenge = await tx.challenge.findUnique({
+          where: { id: challengeId },
+          include: {
+            game: true,
+            challenger: true,
+            opponent: true,
+          },
+        });
 
-    if (!challenge) {
-      await ctx.answerCallbackQuery({ text: 'Challenge not found.' });
-      return;
-    }
+        if (!challenge) {
+          return { error: 'Challenge not found.' };
+        }
 
-    // Verify the user accepting is the opponent
-    const user = await prisma.user.findUnique({
-      where: { telegramId: BigInt(telegramUser.id) },
-    });
+        // Verify the user accepting is the opponent
+        const user = await tx.user.findUnique({
+          where: { telegramId: BigInt(telegramUser.id) },
+        });
 
-    if (!user || user.id !== challenge.opponentId) {
-      await ctx.answerCallbackQuery({ text: 'Only the challenged user can accept.' });
-      return;
-    }
+        if (!user || user.id !== challenge.opponentId) {
+          return { error: 'Only the challenged user can accept.' };
+        }
 
-    if (challenge.status !== 'PENDING') {
-      await ctx.answerCallbackQuery({ text: 'This challenge is no longer active.' });
-      return;
-    }
+        if (challenge.status !== 'PENDING') {
+          return { error: 'This challenge is no longer active.' };
+        }
 
-    if (new Date() > challenge.expiresAt) {
-      await prisma.challenge.update({
-        where: { id: challengeId },
-        data: { status: 'EXPIRED' },
+        if (new Date() > challenge.expiresAt) {
+          await tx.challenge.update({
+            where: { id: challengeId },
+            data: { status: 'EXPIRED' },
+          });
+          return { error: 'This challenge has expired.' };
+        }
+
+        // Create a new round for this challenge
+        const { address, encryptedSecretKey } = await createRoundWallet();
+
+        const round = await tx.round.create({
+          data: {
+            gameId: challenge.gameId,
+            chatId: challenge.chatId,
+            walletAddress: address,
+            walletSecretKey: encryptedSecretKey,
+            expiresAt: challenge.game.startTime,
+          },
+        });
+
+        // Create wagers for both users (pending deposit)
+        const opponentTeam = challenge.challengerTeam === 'home' ? 'away' : 'home';
+
+        await tx.wager.createMany({
+          data: [
+            {
+              roundId: round.id,
+              userId: challenge.challengerId,
+              teamPick: challenge.challengerTeam,
+              amount: BigInt(0),
+            },
+            {
+              roundId: round.id,
+              userId: challenge.opponentId,
+              teamPick: opponentTeam,
+              amount: BigInt(0),
+            },
+          ],
+        });
+
+        // Update challenge status
+        await tx.challenge.update({
+          where: { id: challengeId },
+          data: {
+            status: 'ACCEPTED',
+            roundId: round.id,
+          },
+        });
+
+        return { success: true, challenge, round, address };
       });
-      await ctx.answerCallbackQuery({ text: 'This challenge has expired.' });
+    }, 30000); // 30 second lock timeout
+
+    if (result === null) {
+      await ctx.answerCallbackQuery({ text: 'Processing... please wait.' });
       return;
     }
 
-    // Create a new round for this challenge
-    const { address, encryptedSecretKey } = await createRoundWallet();
+    if ('error' in result) {
+      await ctx.answerCallbackQuery({ text: result.error });
+      return;
+    }
 
-    const round = await prisma.round.create({
-      data: {
-        gameId: challenge.gameId,
-        chatId: challenge.chatId,
-        walletAddress: address,
-        walletSecretKey: encryptedSecretKey,
-        expiresAt: challenge.game.startTime,
-      },
-    });
-
-    // Create wagers for both users (pending deposit)
-    const opponentTeam = challenge.challengerTeam === 'home' ? 'away' : 'home';
-
-    await prisma.wager.createMany({
-      data: [
-        {
-          roundId: round.id,
-          userId: challenge.challengerId,
-          teamPick: challenge.challengerTeam,
-          amount: BigInt(0), // Will be updated on deposit
-        },
-        {
-          roundId: round.id,
-          userId: challenge.opponentId,
-          teamPick: opponentTeam,
-          amount: BigInt(0), // Will be updated on deposit
-        },
-      ],
-    });
-
-    // Update challenge status
-    await prisma.challenge.update({
-      where: { id: challengeId },
-      data: {
-        status: 'ACCEPTED',
-        roundId: round.id,
-      },
-    });
-
+    const { challenge, round, address } = result;
     const amountSol = Number(challenge.amount) / LAMPORTS_PER_SOL;
     const challengerTeamName = challenge.challengerTeam === 'home'
       ? challenge.game.homeTeam

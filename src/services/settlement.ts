@@ -4,46 +4,55 @@ import { config } from '../utils/config.js';
 import { sendSol, getWalletBalance } from './wallet.js';
 import { createChildLogger } from '../utils/logger.js';
 import { bot } from '../bot/bot.js';
+import { withLock } from '../utils/locks.js';
 
 const logger = createChildLogger('settlement');
 
 // Settle all rounds for completed games
 export async function settleCompletedGames(): Promise<void> {
-  // Find all games that are FINAL with active rounds
-  const games = await prisma.game.findMany({
-    where: {
-      status: 'FINAL',
-      winner: { not: null },
-      rounds: {
-        some: {
-          status: 'LOCKED',
+  // Use distributed lock for entire settlement process
+  const result = await withLock('scheduler:settlement', async () => {
+    // Find all games that are FINAL with active rounds
+    const games = await prisma.game.findMany({
+      where: {
+        status: 'FINAL',
+        winner: { not: null },
+        rounds: {
+          some: {
+            status: 'LOCKED',
+          },
         },
       },
-    },
-    include: {
-      rounds: {
-        where: {
-          status: 'LOCKED',
-        },
-        include: {
-          wagers: {
-            include: {
-              user: true,
+      include: {
+        rounds: {
+          where: {
+            status: 'LOCKED',
+          },
+          include: {
+            wagers: {
+              include: {
+                user: true,
+              },
             },
           },
         },
       },
-    },
-  });
+    });
 
-  for (const game of games) {
-    for (const round of game.rounds) {
-      try {
-        await settleRound(round, game.winner!, game);
-      } catch (error) {
-        logger.error({ error, roundId: round.id }, 'Failed to settle round');
+    for (const game of games) {
+      for (const round of game.rounds) {
+        try {
+          await settleRound(round, game.winner!, game);
+        } catch (error) {
+          logger.error({ error, roundId: round.id }, 'Failed to settle round');
+        }
       }
     }
+    return true;
+  }, 300000); // 5 minute lock timeout for settlement
+
+  if (result === null) {
+    logger.debug('Skipping settlement - another instance is already settling');
   }
 }
 
@@ -58,6 +67,7 @@ async function settleRound(
       id: string;
       teamPick: string;
       amount: bigint;
+      paidOut?: boolean;
       user: {
         id: string;
         username: string | null;
@@ -68,19 +78,46 @@ async function settleRound(
   winner: string,
   game: { homeTeam: string; awayTeam: string }
 ): Promise<void> {
-  logger.info({ roundId: round.id, winner }, 'Settling round');
-
-  // Get current wallet balance
-  const balance = await getWalletBalance(round.walletAddress);
-
-  if (balance === BigInt(0)) {
-    logger.warn({ roundId: round.id }, 'Round wallet is empty, marking as settled');
-    await prisma.round.update({
+  // Use per-round lock to prevent concurrent settlement of same round
+  const result = await withLock(`round:settle:${round.id}`, async () => {
+    // Re-check round status inside lock (idempotency check)
+    const currentRound = await prisma.round.findUnique({
       where: { id: round.id },
-      data: { status: 'SETTLED', settledAt: new Date() },
+      select: { status: true },
     });
+
+    if (!currentRound || currentRound.status !== 'LOCKED') {
+      logger.info({ roundId: round.id, status: currentRound?.status }, 'Round already settled or not locked');
+      return { skipped: true };
+    }
+
+    logger.info({ roundId: round.id, winner }, 'Settling round');
+
+    // Get current wallet balance
+    const balance = await getWalletBalance(round.walletAddress);
+
+    if (balance === BigInt(0)) {
+      logger.warn({ roundId: round.id }, 'Round wallet is empty, marking as settled');
+      await prisma.round.update({
+        where: { id: round.id },
+        data: { status: 'SETTLED', settledAt: new Date() },
+      });
+      return { skipped: true };
+    }
+
+    return { skipped: false, balance };
+  }, 120000); // 2 minute lock timeout
+
+  if (result === null) {
+    logger.debug({ roundId: round.id }, 'Skipping round - another instance is settling it');
     return;
   }
+
+  if (result.skipped || !result.balance) {
+    return;
+  }
+
+  const balance = result.balance;
 
   // Calculate fee
   const fee = (balance * BigInt(Math.floor(FEE_PERCENTAGE * 10000))) / BigInt(10000);

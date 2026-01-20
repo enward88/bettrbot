@@ -3,6 +3,7 @@ import { prisma } from '../../db/prisma.js';
 import { createRoundWallet } from '../../services/wallet.js';
 import { MIN_BET_SOL, MAX_P2P_BET_SOL } from '../../utils/constants.js';
 import { createChildLogger } from '../../utils/logger.js';
+import { withLock } from '../../utils/locks.js';
 
 const logger = createChildLogger('cb:selectTeam');
 
@@ -58,45 +59,107 @@ export async function handleTeamSelection(ctx: BotContext) {
       return;
     }
 
-    // Find or create round for this game in this chat
-    let round = await prisma.round.findFirst({
-      where: {
-        gameId: game.id,
-        chatId: BigInt(chatId),
-        status: 'OPEN',
-      },
-    });
+    // Use lock to prevent race condition on round/wager creation
+    const result = await withLock(`bet:${game.id}:${chatId}:${user.id}`, async () => {
+      // Use transaction to atomically find/create round and wager
+      return await prisma.$transaction(async (tx) => {
+        // Find existing open round for this game/chat
+        let round = await tx.round.findFirst({
+          where: {
+            gameId: game.id,
+            chatId: BigInt(chatId),
+            status: 'OPEN',
+          },
+        });
 
-    if (!round) {
-      // Create new round with unique wallet
-      const { address, encryptedSecretKey } = await createRoundWallet();
+        if (!round) {
+          // Create new round with unique wallet
+          const { address, encryptedSecretKey } = await createRoundWallet();
 
-      round = await prisma.round.create({
-        data: {
-          gameId: game.id,
-          chatId: BigInt(chatId),
-          walletAddress: address,
-          walletSecretKey: encryptedSecretKey,
-          expiresAt: game.startTime,
-        },
+          try {
+            round = await tx.round.create({
+              data: {
+                gameId: game.id,
+                chatId: BigInt(chatId),
+                walletAddress: address,
+                walletSecretKey: encryptedSecretKey,
+                expiresAt: game.startTime,
+              },
+            });
+            logger.info({ roundId: round.id, gameId, chatId }, 'Created new betting round');
+          } catch (createError) {
+            // If unique constraint violation, another user just created it - fetch it
+            if ((createError as { code?: string }).code === 'P2002') {
+              round = await tx.round.findFirst({
+                where: {
+                  gameId: game.id,
+                  chatId: BigInt(chatId),
+                  status: 'OPEN',
+                },
+              });
+              if (!round) throw createError; // Re-throw if still not found
+            } else {
+              throw createError;
+            }
+          }
+        }
+
+        // Check if user already has a wager in this round (using unique constraint)
+        const existingWager = await tx.wager.findUnique({
+          where: {
+            roundId_userId: {
+              roundId: round.id,
+              userId: user.id,
+            },
+          },
+        });
+
+        if (existingWager) {
+          return { type: 'existing' as const, wager: existingWager, round };
+        }
+
+        // Create pending wager (amount will be set when deposit is detected)
+        try {
+          await tx.wager.create({
+            data: {
+              roundId: round.id,
+              userId: user.id,
+              teamPick,
+              amount: BigInt(0),
+            },
+          });
+        } catch (wagerError) {
+          // If unique constraint violation, user already has a wager (race condition)
+          if ((wagerError as { code?: string }).code === 'P2002') {
+            const existingWager = await tx.wager.findUnique({
+              where: {
+                roundId_userId: {
+                  roundId: round.id,
+                  userId: user.id,
+                },
+              },
+            });
+            if (existingWager) {
+              return { type: 'existing' as const, wager: existingWager, round };
+            }
+          }
+          throw wagerError;
+        }
+
+        return { type: 'created' as const, round };
       });
+    }, 30000); // 30 second lock timeout
 
-      logger.info({ roundId: round.id, gameId, chatId }, 'Created new betting round');
+    if (result === null) {
+      await ctx.answerCallbackQuery({ text: 'Processing... please try again.' });
+      return;
     }
 
-    // Check if user already has a wager in this round
-    const existingWager = await prisma.wager.findFirst({
-      where: {
-        roundId: round.id,
-        userId: user.id,
-      },
-    });
-
-    if (existingWager) {
-      const teamName = existingWager.teamPick === 'home' ? game.homeTeam : game.awayTeam;
+    if (result.type === 'existing') {
+      const teamName = result.wager.teamPick === 'home' ? game.homeTeam : game.awayTeam;
       await ctx.editMessageText(
         `You already have a bet on ${teamName} in this round.\n\n` +
-          `Wallet: \`${round.walletAddress}\`\n\n` +
+          `Wallet: \`${result.round.walletAddress}\`\n\n` +
           `Send more SOL to increase your wager.`,
         { parse_mode: 'Markdown' }
       );
@@ -104,15 +167,7 @@ export async function handleTeamSelection(ctx: BotContext) {
       return;
     }
 
-    // Create pending wager (amount will be set when deposit is detected)
-    await prisma.wager.create({
-      data: {
-        roundId: round.id,
-        userId: user.id,
-        teamPick,
-        amount: BigInt(0), // Will be updated when deposit detected
-      },
-    });
+    const round = result.round;
 
     const teamName = teamPick === 'home' ? game.homeTeam : game.awayTeam;
 

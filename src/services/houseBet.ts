@@ -5,6 +5,7 @@ import { sendSol, getWalletBalance, createRoundWallet } from './wallet.js';
 import { calculatePayout, formatOdds } from './odds.js';
 import { createChildLogger } from '../utils/logger.js';
 import { bot } from '../bot/bot.js';
+import { withLock } from '../utils/locks.js';
 import type { BetType, HouseBetResult } from '@prisma/client';
 
 const logger = createChildLogger('houseBet');
@@ -154,27 +155,39 @@ export async function confirmHouseBetDeposit(
 
 // Settle all house bets for completed games
 export async function settleHouseBets(): Promise<void> {
-  // Find all games that are FINAL with active house bets
-  const games = await prisma.game.findMany({
-    where: {
-      status: 'FINAL',
-      houseBets: {
-        some: {
-          status: 'ACTIVE',
+  // Use distributed lock for house bet settlement
+  const result = await withLock('scheduler:house_bet_settlement', async () => {
+    // Find all games that are FINAL with active house bets
+    const games = await prisma.game.findMany({
+      where: {
+        status: 'FINAL',
+        houseBets: {
+          some: {
+            status: 'ACTIVE',
+          },
         },
       },
-    },
-    include: {
-      houseBets: {
-        where: {
-          status: 'ACTIVE',
-        },
-        include: {
-          user: true,
+      include: {
+        houseBets: {
+          where: {
+            status: 'ACTIVE',
+          },
+          include: {
+            user: true,
+          },
         },
       },
-    },
-  });
+    });
+
+    return games;
+  }, 300000); // 5 minute lock timeout
+
+  if (result === null) {
+    logger.debug('Skipping house bet settlement - another instance is already settling');
+    return;
+  }
+
+  const games = result;
 
   // First pass: determine results and calculate total needed for payouts
   const betsToSettle: Array<{
@@ -650,87 +663,113 @@ export function hasOddsForBetType(
 
 // Poll pending house bet wallets for deposits
 export async function pollHouseBetWallets(): Promise<void> {
-  const pendingBets = await prisma.houseBet.findMany({
-    where: {
-      status: 'PENDING',
-    },
-    include: {
-      user: true,
-      game: true,
-    },
-  });
+  // Use distributed lock to prevent concurrent polling
+  const result = await withLock('scheduler:house_bet_poll', async () => {
+    const pendingBets = await prisma.houseBet.findMany({
+      where: {
+        status: 'PENDING',
+      },
+      include: {
+        user: true,
+        game: true,
+      },
+    });
 
-  if (pendingBets.length === 0) {
-    return;
-  }
-
-  logger.debug({ count: pendingBets.length }, 'Polling house bet wallets');
-
-  for (const bet of pendingBets) {
-    // Skip bets without deposit wallet (legacy bets)
-    if (!bet.depositAddress || !bet.depositSecretKey) {
-      continue;
+    if (pendingBets.length === 0) {
+      return [];
     }
 
-    try {
-      const balance = await getWalletBalance(bet.depositAddress);
+    logger.debug({ count: pendingBets.length }, 'Polling house bet wallets');
 
-      // Check if deposit meets or exceeds expected amount
-      if (balance >= bet.amount) {
-        logger.info(
-          {
-            houseBetId: bet.id,
-            expected: bet.amount.toString(),
-            received: balance.toString(),
-            depositAddress: bet.depositAddress,
-          },
-          'House bet deposit detected'
-        );
+    for (const bet of pendingBets) {
+      // Skip bets without deposit wallet (legacy bets)
+      if (!bet.depositAddress || !bet.depositSecretKey) {
+        continue;
+      }
 
-        // Just mark as ACTIVE - funds stay in deposit wallet until settlement
-        await prisma.houseBet.update({
-          where: { id: bet.id },
-          data: {
-            status: 'ACTIVE',
-          },
-        });
+      try {
+        const balance = await getWalletBalance(bet.depositAddress);
 
-        // Notify user
-        try {
-          const amountSol = Number(bet.amount) / LAMPORTS_PER_SOL;
-          const potentialWinSol = Number(bet.potentialWin) / LAMPORTS_PER_SOL;
+        // Check if deposit meets or exceeds expected amount
+        if (balance >= bet.amount) {
+          logger.info(
+            {
+              houseBetId: bet.id,
+              expected: bet.amount.toString(),
+              received: balance.toString(),
+              depositAddress: bet.depositAddress,
+            },
+            'House bet deposit detected'
+          );
 
-          let betDescription: string;
-          if (bet.betType === 'MONEYLINE') {
-            const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
-            betDescription = `${team} ML (${formatOdds(bet.odds)})`;
-          } else if (bet.betType === 'TOTAL_OVER') {
-            betDescription = `Over ${bet.line} (${formatOdds(bet.odds)})`;
-          } else if (bet.betType === 'TOTAL_UNDER') {
-            betDescription = `Under ${bet.line} (${formatOdds(bet.odds)})`;
-          } else {
-            const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
-            betDescription = `${team} ${bet.line} (${formatOdds(bet.odds)})`;
+          // Use transaction with status check to prevent race condition
+          try {
+            await prisma.$transaction(async (tx) => {
+              // Re-check status inside transaction
+              const currentBet = await tx.houseBet.findUnique({
+                where: { id: bet.id },
+                select: { status: true },
+              });
+
+              if (currentBet?.status !== 'PENDING') {
+                logger.debug({ houseBetId: bet.id }, 'House bet already activated (race avoided)');
+                return;
+              }
+
+              // Mark as ACTIVE - funds stay in deposit wallet until settlement
+              await tx.houseBet.update({
+                where: { id: bet.id },
+                data: { status: 'ACTIVE' },
+              });
+            });
+          } catch (txError) {
+            logger.error({ error: txError, houseBetId: bet.id }, 'Failed to activate house bet');
+            continue;
           }
 
-          const username = bet.user.username ? `@${bet.user.username}` : 'Bettor';
-          await bot.api.sendMessage(
-            bet.chatId.toString(),
-            `✅ House Bet Confirmed!\n\n` +
-              `${username}'s bet on ${bet.game.awayTeam} @ ${bet.game.homeTeam}:\n` +
-              `${betDescription}\n` +
-              `Amount: ${amountSol.toFixed(4)} SOL\n` +
-              `Potential win: ${potentialWinSol.toFixed(4)} SOL`
-          );
-        } catch (notifyError) {
-          logger.warn({ error: notifyError, houseBetId: bet.id }, 'Failed to send deposit confirmation');
-        }
+          // Notify user (outside transaction)
+          try {
+            const amountSol = Number(bet.amount) / LAMPORTS_PER_SOL;
+            const potentialWinSol = Number(bet.potentialWin) / LAMPORTS_PER_SOL;
 
-        logger.info({ houseBetId: bet.id }, 'House bet activated');
+            let betDescription: string;
+            if (bet.betType === 'MONEYLINE') {
+              const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
+              betDescription = `${team} ML (${formatOdds(bet.odds)})`;
+            } else if (bet.betType === 'TOTAL_OVER') {
+              betDescription = `Over ${bet.line} (${formatOdds(bet.odds)})`;
+            } else if (bet.betType === 'TOTAL_UNDER') {
+              betDescription = `Under ${bet.line} (${formatOdds(bet.odds)})`;
+            } else {
+              const team = bet.pick === 'home' ? bet.game.homeTeam : bet.game.awayTeam;
+              betDescription = `${team} ${bet.line} (${formatOdds(bet.odds)})`;
+            }
+
+            const username = bet.user.username ? `@${bet.user.username}` : 'Bettor';
+            await bot.api.sendMessage(
+              bet.chatId.toString(),
+              `✅ House Bet Confirmed!\n\n` +
+                `${username}'s bet on ${bet.game.awayTeam} @ ${bet.game.homeTeam}:\n` +
+                `${betDescription}\n` +
+                `Amount: ${amountSol.toFixed(4)} SOL\n` +
+                `Potential win: ${potentialWinSol.toFixed(4)} SOL`
+            );
+          } catch (notifyError) {
+            logger.warn({ error: notifyError, houseBetId: bet.id }, 'Failed to send deposit confirmation');
+          }
+
+          logger.info({ houseBetId: bet.id }, 'House bet activated');
+        }
+      } catch (error) {
+        logger.error({ error, houseBetId: bet.id }, 'Failed to poll house bet wallet');
       }
-    } catch (error) {
-      logger.error({ error, houseBetId: bet.id }, 'Failed to poll house bet wallet');
     }
+
+    return pendingBets;
+  }, 120000); // 2 minute lock timeout
+
+  if (result === null) {
+    logger.debug('Skipping house bet poll - another instance is already polling');
   }
 }
 
